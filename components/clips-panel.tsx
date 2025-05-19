@@ -3,27 +3,32 @@
 import type React from "react"
 
 import { useEffect, useRef } from "react"
-import { FileText, ImageIcon, File, LinkIcon, PaintBucket } from "lucide-react"
+import { FileText, ImageIcon, File, LinkIcon, PaintBucket, Check } from "lucide-react"
 import { useClipboardStore } from "@/lib/clipboard-store"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 
 interface ClipsPanelProps {
   searchQuery: string
   activeFolder: string | null
   selectedClip: string | null
-  onClipSelect: (clipId: string | null) => void
+  selectedClips?: string[]
+  onClipSelect: (clipId: string) => void
   isActive: boolean
   onPanelFocus: () => void
+  multiSelectMode?: boolean
 }
 
 export function ClipsPanel({
   searchQuery,
   activeFolder,
   selectedClip,
+  selectedClips = [],
   onClipSelect,
   isActive,
   onPanelFocus,
+  multiSelectMode = false,
 }: ClipsPanelProps) {
   const { clips } = useClipboardStore()
   const panelRef = useRef<HTMLDivElement>(null)
@@ -54,7 +59,7 @@ export function ClipsPanel({
         newIndex = currentIndex > 0 ? currentIndex - 1 : filteredClips.length - 1
       }
 
-      onClipSelect(filteredClips[newIndex]?.id || null)
+      onClipSelect(filteredClips[newIndex]?.id || "")
     }
   }
 
@@ -85,7 +90,7 @@ export function ClipsPanel({
           newIndex = currentIndex > 0 ? currentIndex - 1 : filteredClips.length - 1
         }
 
-        onClipSelect(filteredClips[newIndex]?.id || null)
+        onClipSelect(filteredClips[newIndex]?.id || "")
       }
     }
 
@@ -115,79 +120,94 @@ export function ClipsPanel({
         </div>
       ) : (
         <div className="divide-y">
-          {filteredClips.map((clip) => (
-            <div
-              key={clip.id}
-              data-clip-id={clip.id}
-              className={cn(
-                "p-4 cursor-pointer hover:bg-accent/50 flex items-start gap-3 transition-colors",
-                selectedClip === clip.id && "bg-accent",
-              )}
-              onClick={() => onClipSelect(clip.id)}
-            >
-              <div className="mt-0.5">
-                {clip.type === "text" && (
-                  <div className="rounded-full bg-blue-100 dark:bg-blue-900/30 p-1">
-                    <FileText className="h-4 w-4 text-blue-500" />
+          {filteredClips.map((clip) => {
+            const isSelected = multiSelectMode 
+              ? selectedClips.includes(clip.id)
+              : selectedClip === clip.id;
+            
+            return (
+              <div
+                key={clip.id}
+                data-clip-id={clip.id}
+                className={cn(
+                  "p-4 cursor-pointer hover:bg-accent/50 flex items-start gap-3 transition-colors",
+                  isSelected && "bg-accent",
+                )}
+                onClick={() => onClipSelect(clip.id)}
+              >
+                {multiSelectMode ? (
+                  <div className="mt-0.5">
+                    <Checkbox
+                      checked={selectedClips.includes(clip.id)}
+                      className="pointer-events-none"
+                    />
+                  </div>
+                ) : (
+                  <div className="mt-0.5">
+                    {clip.type === "text" && (
+                      <div className="rounded-full bg-blue-100 dark:bg-blue-900/30 p-1">
+                        <FileText className="h-4 w-4 text-blue-500" />
+                      </div>
+                    )}
+                    {clip.type === "image" && (
+                      <div className="rounded-full bg-green-100 dark:bg-green-900/30 p-1">
+                        <ImageIcon className="h-4 w-4 text-green-500" />
+                      </div>
+                    )}
+                    {clip.type === "file" && (
+                      <div className="rounded-full bg-orange-100 dark:bg-orange-900/30 p-1">
+                        <File className="h-4 w-4 text-orange-500" />
+                      </div>
+                    )}
+                    {clip.type === "link" && (
+                      <div className="rounded-full bg-purple-100 dark:bg-purple-900/30 p-1">
+                        <LinkIcon className="h-4 w-4 text-purple-500" />
+                      </div>
+                    )}
+                    {clip.type === "color" && (
+                      <div className="rounded-full bg-red-100 dark:bg-red-900/30 p-1">
+                        <PaintBucket className="h-4 w-4 text-red-500" />
+                      </div>
+                    )}
                   </div>
                 )}
-                {clip.type === "image" && (
-                  <div className="rounded-full bg-green-100 dark:bg-green-900/30 p-1">
-                    <ImageIcon className="h-4 w-4 text-green-500" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium truncate">{clip.title || "Untitled"}</div>
+                  <div className="text-sm text-muted-foreground truncate">
+                    {clip.type === "text" && clip.content.substring(0, 60)}
+                    {clip.type === "image" && "Image"}
+                    {clip.type === "file" && clip.path}
+                    {clip.type === "link" && clip.url}
+                    {clip.type === "color" && clip.value}
                   </div>
-                )}
-                {clip.type === "file" && (
-                  <div className="rounded-full bg-orange-100 dark:bg-orange-900/30 p-1">
-                    <File className="h-4 w-4 text-orange-500" />
+                  <div className="flex items-center mt-1">
+                    <div className="text-xs text-muted-foreground">{new Date(clip.createdAt).toLocaleString()}</div>
+                    {clip.source && (
+                      <>
+                        <div className="mx-1 w-1 h-1 rounded-full bg-muted-foreground"></div>
+                        <div className="text-xs text-muted-foreground">{clip.source}</div>
+                      </>
+                    )}
+                    {clip.pasteCount > 0 && (
+                      <>
+                        <div className="mx-1 w-1 h-1 rounded-full bg-muted-foreground"></div>
+                        <div className="text-xs text-muted-foreground">Used {clip.pasteCount} times</div>
+                      </>
+                    )}
                   </div>
-                )}
-                {clip.type === "link" && (
-                  <div className="rounded-full bg-purple-100 dark:bg-purple-900/30 p-1">
-                    <LinkIcon className="h-4 w-4 text-purple-500" />
-                  </div>
-                )}
-                {clip.type === "color" && (
-                  <div className="rounded-full bg-red-100 dark:bg-red-900/30 p-1">
-                    <PaintBucket className="h-4 w-4 text-red-500" />
-                  </div>
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="font-medium truncate">{clip.title || "Untitled"}</div>
-                <div className="text-sm text-muted-foreground truncate">
-                  {clip.type === "text" && clip.content.substring(0, 60)}
-                  {clip.type === "image" && "Image"}
-                  {clip.type === "file" && clip.path}
-                  {clip.type === "link" && clip.url}
-                  {clip.type === "color" && clip.value}
-                </div>
-                <div className="flex items-center mt-1">
-                  <div className="text-xs text-muted-foreground">{new Date(clip.createdAt).toLocaleString()}</div>
-                  {clip.source && (
-                    <>
-                      <div className="mx-1 w-1 h-1 rounded-full bg-muted-foreground"></div>
-                      <div className="text-xs text-muted-foreground">{clip.source}</div>
-                    </>
+                  {clip.tags && clip.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {clip.tags.map((tag, i) => (
+                        <Badge key={i} variant="outline" className="text-xs">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
                   )}
-                  {clip.pasteCount > 0 && (
-                    <>
-                      <div className="mx-1 w-1 h-1 rounded-full bg-muted-foreground"></div>
-                      <div className="text-xs text-muted-foreground">Used {clip.pasteCount} times</div>
-                    </>
-                  )}
                 </div>
-                {clip.tags && clip.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {clip.tags.map((tag, i) => (
-                      <Badge key={i} variant="outline" className="text-xs">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

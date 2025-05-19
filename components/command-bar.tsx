@@ -1,10 +1,10 @@
 "use client"
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Clipboard, Layers, Code, Laptop, Settings } from 'lucide-react';
+import { Search, Clipboard, Layers, Code, Laptop, Settings, Keyboard, Calculator, MenuSquare, StickyNote, ClipboardCopy, Smile, MessageSquare } from 'lucide-react';
 
 interface CommandBarProps {
-  onViewChange: (view: "command" | "clipboard" | "pasteStack" | "snippets" | "appSearch" | "preferences") => void;
+  onViewChange: (view: "command" | "clipboard" | "pasteStack" | "snippets" | "appSearch" | "preferences" | "contextualShortcuts" | "calculator" | "menuSearch" | "notes" | "multiClipboard" | "emojiSearch" | "aiChat") => void;
 }
 
 export function CommandBar({ onViewChange }: CommandBarProps) {
@@ -14,38 +14,99 @@ export function CommandBar({ onViewChange }: CommandBarProps) {
 
   const commands = [
     {
+      id: 'notes',
+      name: 'Notes',
+      description: 'Create and manage your notes with folders and tags',
+      icon: <StickyNote className="h-5 w-5" />,
+      iconColor: 'text-yellow-300',
+      action: () => onViewChange('notes')
+    },
+    {
       id: 'clipboard',
-      name: 'Open Clipboard Manager',
+      name: 'Clipboard Manager',
       description: 'Access your clipboard history',
       icon: <Clipboard className="h-5 w-5" />,
+      iconColor: 'text-green-400',
       action: () => onViewChange('clipboard')
     },
     {
+      id: 'multiClipboard',
+      name: 'Multi-Clipboard',
+      description: 'Work with multiple clipboard items simultaneously',
+      icon: <ClipboardCopy className="h-5 w-5" />,
+      iconColor: 'text-blue-300',
+      action: () => onViewChange('multiClipboard')
+    },
+    {
+      id: 'aiChat',
+      name: 'AI Assistant',
+      description: 'Chat with AI assistants from multiple providers',
+      icon: <MessageSquare className="h-5 w-5" />,
+      iconColor: 'text-blue-400',
+      action: () => onViewChange('aiChat')
+    },
+    {
+      id: 'emojiSearch',
+      name: 'Emoji Search',
+      description: 'Find and copy emojis quickly',
+      icon: <Smile className="h-5 w-5" />,
+      iconColor: 'text-yellow-400',
+      action: () => onViewChange('emojiSearch')
+    },
+    {
       id: 'pasteStack',
-      name: 'Open Paste Stack',
+      name: 'Paste Stack',
       description: 'Manage your paste sequences',
       icon: <Layers className="h-5 w-5" />,
+      iconColor: 'text-orange-400',
       action: () => onViewChange('pasteStack')
     },
     {
       id: 'snippets',
-      name: 'Open Snippets Manager',
+      name: 'Snippets Manager',
       description: 'Create and use text snippets',
       icon: <Code className="h-5 w-5" />,
+      iconColor: 'text-purple-400',
       action: () => onViewChange('snippets')
     },
     {
       id: 'appSearch',
-      name: 'Search Applications',
+      name: 'App Search',
       description: 'Find and launch applications',
       icon: <Laptop className="h-5 w-5" />,
+      iconColor: 'text-blue-400',
       action: () => onViewChange('appSearch')
+    },
+    {
+      id: 'calculator',
+      name: 'Calculator',
+      description: 'Perform quick calculations and currency conversions',
+      icon: <Calculator className="h-5 w-5" />,
+      iconColor: 'text-yellow-400',
+      action: () => onViewChange('calculator')
+    },
+    {
+      id: 'menuSearch',
+      name: 'Menu Search',
+      description: 'Search and execute menu items from active application',
+      icon: <MenuSquare className="h-5 w-5" />,
+      iconColor: 'text-green-600',
+      action: () => onViewChange('menuSearch')
+    },
+    {
+      id: 'contextualShortcuts',
+      name: 'Contextual Shortcuts',
+      description: 'Set up app-specific keyboard shortcuts',
+      icon: <Keyboard className="h-5 w-5" />,
+      iconColor: 'text-cyan-400',
+      action: () => onViewChange('contextualShortcuts')
     },
     {
       id: 'preferences',
       name: 'Preferences',
       description: 'Configure keyboard shortcuts and settings',
       icon: <Settings className="h-5 w-5" />,
+      iconColor: 'text-gray-400',
       action: () => onViewChange('preferences')
     }
   ];
@@ -91,7 +152,7 @@ export function CommandBar({ onViewChange }: CommandBarProps) {
       <div className="p-4">
         <div className="relative">
           <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-            <Search className="h-5 w-5 text-gray-400" />
+            <Search className="h-5 w-5 text-blue-400" />
           </div>
           <input
             ref={inputRef}
@@ -118,7 +179,7 @@ export function CommandBar({ onViewChange }: CommandBarProps) {
                 onClick={command.action}
                 onMouseEnter={() => setSelectedIndex(index)}
               >
-                <div className="flex-shrink-0 w-8 h-8 mr-3 flex items-center justify-center text-gray-400">
+                <div className={`flex-shrink-0 w-8 h-8 mr-3 flex items-center justify-center rounded-md bg-gray-800 ${command.iconColor}`}>
                   {command.icon}
                 </div>
                 <div className="flex-1 min-w-0">

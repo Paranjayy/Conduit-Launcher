@@ -1,218 +1,143 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Search, Laptop, ArrowRight } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Search, Laptop, ArrowRight, Filter, ChevronDown } from 'lucide-react';
+import { AppSearchProvider } from '@/lib/providers/app-provider';
+import type { SearchResult } from '@/lib/search-providers';
 
-// Define types directly
-declare global {
-  interface Window {
-    electron?: {
-      clipboard: {
-        readText: () => Promise<string>;
-        writeText: (text: string) => Promise<boolean>;
-      };
-      window: {
-        minimize: () => void;
-        maximize: () => void;
-        close: () => void;
-      };
-      app: {
-        getAppVersion: () => Promise<string>;
-        getApplications: () => Promise<Array<{name: string; path: string; icon: string}>>;
-        launchApplication: (appPath: string) => Promise<boolean>;
-        onAdditionalApps: (callback: (apps: Array<{name: string; path: string; icon: string}>) => void) => () => void;
-      };
-      shortcuts?: {
-        saveShortcuts: (config: any) => Promise<boolean>;
-        onGlobalShortcut: (callback: (id: string) => void) => () => void;
-      };
-    };
-  }
-}
+// Define filter categories
+type FilterCategory = 'all' | 'system' | 'user' | 'utilities' | 'creativity' | 'productivity';
 
 interface AppSearchProps {
-  onViewChange: (view: "command" | "clipboard" | "pasteStack" | "snippets" | "appSearch" | "preferences") => void;
+  onViewChange: (view: string) => void; // Keep as string for flexibility
 }
-
-interface Application {
-  name: string;
-  path: string;
-  icon: string;
-}
-
-// Simple cache for applications
-let cachedApps: Application[] | null = null;
-let lastCacheTime = 0;
-const CACHE_EXPIRY = 10 * 60 * 1000; // 10 minutes
 
 export function AppSearch({ onViewChange }: AppSearchProps) {
   const [searchTerm, setSearchTerm] = useState('');
-  const [applications, setApplications] = useState<Application[]>([]);
-  const [filteredApps, setFilteredApps] = useState<Application[]>([]);
+  const [filteredApps, setFilteredApps] = useState<SearchResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [failedIcons, setFailedIcons] = useState<Set<string>>(new Set());
+  const [filterCategory, setFilterCategory] = useState<FilterCategory>('all');
+  const [showFilterDropdown, setShowFilterDropdown] = useState(false);
+
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const selectedItemRef = useRef<HTMLLIElement>(null);
-  const isElectron = typeof window !== 'undefined' && !!window.electron;
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Load applications when component mounts
+  // Memoize the provider instance
+  const appSearchProvider = useMemo(() => new AppSearchProvider(), []);
+
+  // Handle clicks outside the dropdown to close it
   useEffect(() => {
-    const loadApplications = async () => {
-      if (isElectron && window.electron) {
-        try {
-          setIsLoading(true);
-          setLoadError(null);
-          
-          // Check cache first
-          const now = Date.now();
-          if (cachedApps && now - lastCacheTime < CACHE_EXPIRY) {
-            console.log('Using cached applications list');
-            setApplications(cachedApps);
-            setFilteredApps(cachedApps);
-            setIsLoading(false);
-            return;
-          }
-          
-          console.log('Fetching fresh applications list');
-          const apps = await window.electron.app.getApplications();
-          
-          if (apps && Array.isArray(apps)) {
-            // Clean the data to ensure no invalid icons
-            const cleanedApps = apps.map(app => ({
-              ...app,
-              // For now, we'll skip icons since they're causing issues
-              icon: '' // Instead of: typeof app.icon === 'string' ? app.icon : ''
-            }));
-            
-            // Update cache
-            cachedApps = cleanedApps;
-            lastCacheTime = now;
-            
-            setApplications(cleanedApps);
-            setFilteredApps(cleanedApps);
-          } else {
-            setLoadError('No applications found');
-          }
-        } catch (error) {
-          console.error('Error loading applications:', error);
-          setLoadError('Failed to load applications');
-          
-          // Use cache as fallback if available
-          if (cachedApps) {
-            console.log('Using cached applications as fallback after error');
-            setApplications(cachedApps);
-            setFilteredApps(cachedApps);
-            setLoadError(null);
-          }
-        } finally {
-          setIsLoading(false);
-        }
-      } else {
-        setLoadError('Electron environment not detected');
-        setIsLoading(false);
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowFilterDropdown(false);
       }
-    };
-
-    loadApplications();
-    
-    // Set up a listener for additional apps that come in asynchronously
-    let cleanupListener: (() => void) | null = null;
-    
-    if (isElectron && window.electron && window.electron.app.onAdditionalApps) {
-      cleanupListener = window.electron.app.onAdditionalApps((additionalApps) => {
-        if (additionalApps && Array.isArray(additionalApps) && additionalApps.length > 0) {
-          console.log(`Received ${additionalApps.length} additional apps`);
-          
-          setApplications(currentApps => {
-            // Create a map of existing paths to avoid duplicates
-            const existingPaths = new Set(currentApps.map(app => app.path));
-            
-            // Only add apps that don't already exist
-            const newApps = additionalApps.filter(app => !existingPaths.has(app.path));
-            
-            if (newApps.length === 0) return currentApps;
-            
-            // Create a new merged and sorted array
-            const mergedApps = [...currentApps, ...newApps];
-            mergedApps.sort((a, b) => a.name.localeCompare(b.name));
-            
-            // Update cache
-            cachedApps = mergedApps;
-            lastCacheTime = Date.now();
-            
-            return mergedApps;
-          });
-        }
-      });
     }
     
-    // Cleanup listener when component unmounts
+    document.addEventListener('mousedown', handleClickOutside);
     return () => {
-      if (cleanupListener) {
-        cleanupListener();
-      }
+      document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isElectron]);
+  }, []);
 
-  // Update filtered apps when applications or search term changes
-  useEffect(() => {
-    if (searchTerm.trim() === '') {
-      setFilteredApps(applications);
-    } else {
-      const filtered = applications.filter(app => 
-        app.name.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-      setFilteredApps(filtered);
-    }
-    setSelectedIndex(0);
-  }, [searchTerm, applications]);
-
-  // Scroll the selected item into view when selectedIndex changes
-  useEffect(() => {
-    if (selectedItemRef.current && listRef.current) {
-      // Get the container's bounds
-      const container = listRef.current;
-      const item = selectedItemRef.current;
-      
-      const containerRect = container.getBoundingClientRect();
-      const itemRect = item.getBoundingClientRect();
-      
-      // Check if the item is outside the visible area
-      if (itemRect.bottom > containerRect.bottom) {
-        // Item is below the visible area
-        container.scrollTop += (itemRect.bottom - containerRect.bottom) + 8; // Add a small buffer
-      } else if (itemRect.top < containerRect.top) {
-        // Item is above the visible area
-        container.scrollTop -= (containerRect.top - itemRect.top) + 8; // Add a small buffer
-      }
-    }
-  }, [selectedIndex]);
-
-  // Focus input on mount and when component receives focus
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.focus();
     }
+    // Listen to provider updates
+    const unsubscribe = appSearchProvider.subscribe(() => {
+      // Trigger a search to refresh the list when cache updates
+      console.log('App cache updated, icon data may have been received.');
+      setSearchTerm(prevTerm => prevTerm); // Re-trigger search with current term
+    });
+    return unsubscribe;
+  }, [appSearchProvider]);
 
-    // Automatically focus when the component is mounted
-    const focusInput = () => {
-      if (inputRef.current) {
-        inputRef.current.focus();
+  useEffect(() => {
+    const performSearch = async () => {
+      setIsLoading(true);
+      setLoadError(null);
+      try {
+        const results = await appSearchProvider.search(searchTerm);
+        
+        // Apply category filtering
+        let filteredResults = results;
+        if (filterCategory !== 'all') {
+          filteredResults = filterAppsByCategory(results, filterCategory);
+        }
+        
+        setFilteredApps(filteredResults);
+      } catch (error) {
+        console.error("Error searching apps:", error);
+        setLoadError('Failed to search applications.');
+        setFilteredApps([]);
+      } finally {
+        setIsLoading(false);
       }
     };
 
-    // Focus input when window receives focus
-    if (typeof window !== 'undefined') {
-      window.addEventListener('focus', focusInput);
-      
-      return () => {
-        window.removeEventListener('focus', focusInput);
-      };
-    }
-  }, []);
+    performSearch();
+  }, [searchTerm, appSearchProvider, filterCategory]);
 
-  // Handle keyboard navigation
+  // Scroll selected item into view
+  useEffect(() => {
+    if (selectedItemRef.current && listRef.current) {
+      const container = listRef.current;
+      const item = selectedItemRef.current;
+      const containerRect = container.getBoundingClientRect();
+      const itemRect = item.getBoundingClientRect();
+      
+      if (itemRect.bottom > containerRect.bottom) {
+        container.scrollTop += (itemRect.bottom - containerRect.bottom) + 8;
+      } else if (itemRect.top < containerRect.top) {
+        container.scrollTop -= (containerRect.top - itemRect.top) + 8;
+      }
+    }
+  }, [selectedIndex]);
+
+  // Filter apps based on selected category
+  const filterAppsByCategory = (apps: SearchResult[], category: FilterCategory): SearchResult[] => {
+    switch (category) {
+      case 'system':
+        return apps.filter(app => app.description?.includes('/System/Applications'));
+      case 'user':
+        return apps.filter(app => app.description?.includes('/Users/'));
+      case 'utilities':
+        // Simplified logic - in a real app, you might have more sophisticated category detection
+        const utilityKeywords = ['calculator', 'terminal', 'console', 'system', 'preferences', 'utility'];
+        return apps.filter(app => 
+          utilityKeywords.some(keyword => 
+            app.title.toLowerCase().includes(keyword)
+          )
+        );
+      case 'creativity':
+        const creativeKeywords = ['photo', 'image', 'video', 'audio', 'music', 'draw', 'paint', 'edit'];
+        return apps.filter(app => 
+          creativeKeywords.some(keyword => 
+            app.title.toLowerCase().includes(keyword)
+          )
+        );
+      case 'productivity':
+        const productivityKeywords = ['office', 'document', 'spreadsheet', 'presentation', 'notes', 'mail', 'calendar'];
+        return apps.filter(app => 
+          productivityKeywords.some(keyword => 
+            app.title.toLowerCase().includes(keyword)
+          )
+        );
+      default:
+        return apps;
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Close dropdown on Escape if it's open
+    if (e.key === 'Escape' && showFilterDropdown) {
+      setShowFilterDropdown(false);
+      return;
+    }
+    
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
@@ -228,119 +153,133 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
         break;
       case 'Enter':
         if (filteredApps.length > 0 && selectedIndex >= 0 && selectedIndex < filteredApps.length) {
-          launchApplication(filteredApps[selectedIndex].path);
+          launchApplication(filteredApps[selectedIndex]);
         }
         break;
       case 'Escape':
-        if (searchTerm) {
-          // Clear search first if there's text
-          setSearchTerm('');
-        } else {
-          // Go back to command view if search is already empty
-          onViewChange('command');
-        }
+        if (searchTerm) setSearchTerm('');
+        else onViewChange('command');
         break;
-      // Add Home and End key support
       case 'Home':
         e.preventDefault();
-        if (filteredApps.length > 0) {
-          setSelectedIndex(0);
-        }
+        if (filteredApps.length > 0) setSelectedIndex(0);
         break;
       case 'End':
         e.preventDefault();
-        if (filteredApps.length > 0) {
-          setSelectedIndex(filteredApps.length - 1);
-        }
+        if (filteredApps.length > 0) setSelectedIndex(filteredApps.length - 1);
         break;
-      // Add Page Up and Page Down support
       case 'PageUp':
         e.preventDefault();
-        if (filteredApps.length > 0) {
-          setSelectedIndex(prev => Math.max(0, prev - 5));
-        }
+        if (filteredApps.length > 0) setSelectedIndex(prev => Math.max(0, prev - 5));
         break;
       case 'PageDown':
         e.preventDefault();
-        if (filteredApps.length > 0) {
-          setSelectedIndex(prev => Math.min(filteredApps.length - 1, prev + 5));
-        }
+        if (filteredApps.length > 0) setSelectedIndex(prev => Math.min(filteredApps.length - 1, prev + 5));
         break;
     }
   };
 
-  // Launch selected application
-  const launchApplication = async (appPath: string) => {
-    if (!appPath) {
-      console.error('Attempted to launch app with empty path');
-      return;
-    }
-    
-    if (isElectron && window.electron) {
-      try {
-        // Hide the window first for faster perceived response
-        if (window.electron.window) {
-          window.electron.window.minimize();
-        }
-        
-        const success = await window.electron.app.launchApplication(appPath);
-        if (success) {
-          console.log(`Launched application: ${appPath}`);
-          // Go back to command view after successful launch
-          onViewChange('command');
-        }
-      } catch (error) {
-        console.error('Error launching application:', error);
-      }
+  const launchApplication = (appResult: SearchResult) => {
+    if (appResult.action) {
+      appResult.action(); // This should call the action defined in AppSearchProvider
+      // onViewChange('command'); // Or hide window if preferred
+    } else {
+      console.error('No action defined for app:', appResult.title);
     }
   };
 
-  // Safely render app icon with error handling
-  const renderAppIcon = (app: Application) => {
-    if (!app || !app.icon) {
-      return <Laptop className="h-6 w-6 text-gray-400" />;
+  const handleImageError = (appPath: string) => {
+    // console.log(`[AppSearch] Failed to load icon for: ${appPath}, using fallback.`);
+    setFailedIcons(prev => new Set(prev).add(appPath));
+  };
+
+  const renderAppIcon = (searchResult: SearchResult) => {
+    const appPath = searchResult.metadata?.path || searchResult.id;
+    const iconData = searchResult.metadata?.rawIcon; // Use the raw base64 string
+
+    if (!iconData || typeof iconData !== 'string' || failedIcons.has(appPath)) {
+      return <Laptop className="h-6 w-6 text-blue-400" />;
     }
-    
-    try {
-      return (
+    return (
+      <div className="relative w-6 h-6">
         <img 
-          src={`data:image/png;base64,${app.icon}`} 
-          alt={app.name} 
-          className="h-8 w-8 object-contain"
-          onError={(e) => {
-            // Replace with fallback icon on error
-            e.currentTarget.style.display = 'none';
-            e.currentTarget.onerror = null;
-          }}
+          src={iconData} 
+          alt={`${searchResult.title} icon`}
+          className="w-full h-full object-contain"
+          onError={() => handleImageError(appPath)}
+          loading="lazy" // Add lazy loading for better performance with many icons
         />
-      );
-    } catch (error) {
-      return <Laptop className="h-6 w-6 text-gray-400" />;
+      </div>
+    );
+  };
+
+  const getCategoryDisplayName = (category: FilterCategory): string => {
+    switch (category) {
+      case 'all': return 'All Applications';
+      case 'system': return 'System Apps';
+      case 'user': return 'User Apps';
+      case 'utilities': return 'Utilities';
+      case 'creativity': return 'Creativity';
+      case 'productivity': return 'Productivity';
+      default: return 'Unknown';
     }
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Search input */}
-      <div className="p-4">
+    <div className="flex flex-col h-full bg-gray-950 text-gray-100">
+      <div className="p-4 space-y-2">
         <div className="relative">
           <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-            <Search className="h-5 w-5 text-gray-400" />
+            <Search className="h-5 w-5 text-blue-400" />
           </div>
           <input
             ref={inputRef}
             type="text"
-            className="block w-full pl-10 pr-3 py-2 border border-gray-700 rounded-lg bg-gray-900 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="Search applications... (e.g., Chrome, Finder)"
+            className="block w-full pl-10 pr-3 py-2.5 border border-gray-700 rounded-lg bg-gray-900 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+            placeholder="Search applications..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             onKeyDown={handleKeyDown}
             autoFocus
           />
         </div>
+        
+        {/* Filter dropdown */}
+        <div className="relative" ref={dropdownRef}>
+          <button
+            className="flex items-center justify-between w-full px-3 py-2 text-sm font-medium text-left bg-gray-800 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onClick={() => setShowFilterDropdown(prev => !prev)}
+            type="button"
+          >
+            <div className="flex items-center space-x-2">
+              <Filter className="h-4 w-4 text-blue-400" />
+              <span>{getCategoryDisplayName(filterCategory)}</span>
+            </div>
+            <ChevronDown className="h-4 w-4 text-gray-400" />
+          </button>
+          
+          {showFilterDropdown && (
+            <div className="absolute z-10 mt-1 w-full bg-gray-800 rounded-md shadow-lg py-1 text-sm ring-1 ring-black ring-opacity-5 focus:outline-none">
+              {(['all', 'system', 'user', 'utilities', 'creativity', 'productivity'] as FilterCategory[]).map((category) => (
+                <button
+                  key={category}
+                  className={`block px-4 py-2 text-left w-full hover:bg-gray-700 ${
+                    category === filterCategory ? 'bg-blue-700 text-white' : 'text-gray-300'
+                  }`}
+                  onClick={() => {
+                    setFilterCategory(category);
+                    setShowFilterDropdown(false);
+                    setSelectedIndex(0); // Reset selection on filter change
+                  }}
+                >
+                  {getCategoryDisplayName(category)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Applications list */}
       <div className="flex-1 overflow-hidden flex flex-col">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
@@ -355,53 +294,53 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
             <p className="text-sm text-gray-500">Try restarting the application</p>
           </div>
         ) : filteredApps.length > 0 ? (
-          <ul 
-            ref={listRef}
-            className="flex-1 overflow-y-auto px-2 space-y-1"
-            role="listbox"
-          >
-            {filteredApps.map((app, index) => (
-              <li 
-                key={app.path}
-                ref={index === selectedIndex ? selectedItemRef : null}
-                className={`flex items-center p-3 rounded-lg cursor-pointer ${
-                  index === selectedIndex ? 'bg-blue-900 text-white' : 'hover:bg-gray-800 text-gray-200'
-                }`}
-                onClick={() => launchApplication(app.path)}
-                onMouseEnter={() => setSelectedIndex(index)}
-                role="option"
-                aria-selected={index === selectedIndex}
-                tabIndex={index === selectedIndex ? 0 : -1}
-              >
-                <div className="flex-shrink-0 w-8 h-8 mr-3 flex items-center justify-center">
-                  <Laptop className="h-6 w-6 text-gray-400" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{app.name}</p>
-                </div>
-                <ArrowRight className="h-4 w-4 text-gray-400" />
-              </li>
-            ))}
-          </ul>
+          <div className="flex-1 overflow-hidden">
+            <div className="text-xs text-gray-500 px-3 py-1">
+              Showing {filteredApps.length} applications
+            </div>
+            <ul ref={listRef} className="flex-1 overflow-y-auto px-2 space-y-1 custom-scrollbar max-h-[calc(100vh-15rem)]">
+              {filteredApps.map((app, index) => (
+                <li 
+                  key={app.id}
+                  ref={index === selectedIndex ? selectedItemRef : null}
+                  className={`flex items-center p-3 rounded-lg cursor-pointer transition-colors duration-100 ${
+                    index === selectedIndex ? 'bg-blue-700 text-white shadow-lg' : 'hover:bg-gray-800 text-gray-300'
+                  }`}
+                  onClick={() => launchApplication(app)}
+                  onMouseEnter={() => setSelectedIndex(index)}
+                  role="option"
+                  aria-selected={index === selectedIndex}
+                  tabIndex={-1} // Keep focus on input
+                >
+                  <div className="flex-shrink-0 w-8 h-8 mr-3 flex items-center justify-center bg-gray-800/50 rounded-md p-1">
+                    {renderAppIcon(app)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{app.title}</p>
+                    <p className="text-xs text-gray-500 truncate">{app.description}</p>
+                  </div>
+                  {index === selectedIndex && <ArrowRight className="h-4 w-4 text-blue-300 ml-2 flex-shrink-0" />}
+                </li>
+              ))}
+            </ul>
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center px-4 py-8">
-            <div className="text-gray-400 mb-2">
+            <div className="text-gray-500 mb-2">
               <Search className="h-10 w-10 mx-auto mb-2" />
               <p>No applications found</p>
             </div>
-            <p className="text-sm text-gray-500">Try a different search term</p>
+            {searchTerm && <p className="text-sm text-gray-600">Try a different search term</p>}
+            {!searchTerm && filterCategory !== 'all' && (
+              <p className="text-sm text-gray-600">Try a different category</p>
+            )}
           </div>
         )}
       </div>
 
-      {/* Footer */}
-      <div className="p-4 border-t border-gray-800">
-        <button
-          onClick={() => onViewChange('command')}
-          className="w-full py-2 px-4 bg-gray-800 hover:bg-gray-700 text-white rounded-lg flex items-center justify-center"
-        >
-          Back to Command View
-        </button>
+      <div className="p-3 border-t border-gray-800 bg-gray-900 text-xs text-gray-500 flex justify-between">
+        <span>{filteredApps.length} results</span>
+        <span>↑↓ Navigate | ↵ Select | Esc Back</span>
       </div>
     </div>
   );

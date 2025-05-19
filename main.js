@@ -2,6 +2,8 @@ const { app, BrowserWindow, ipcMain, clipboard, shell, globalShortcut } = requir
 const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
+const plist = require('plist');
+const { Icns } = require('@fiahfy/icns');
 const isDev = process.env.NODE_ENV === 'development';
 
 // Keep a global reference to prevent garbage collection
@@ -58,6 +60,9 @@ function registerGlobalShortcuts() {
     { id: 'paste-stack', shortcut: 'CommandOrControl+Shift+P' },
     { id: 'snippets', shortcut: 'CommandOrControl+Shift+S' },
     { id: 'app-search', shortcut: 'CommandOrControl+Shift+A' },
+    { id: 'calculator', shortcut: 'CommandOrControl+Shift+C' },
+    { id: 'menu-search', shortcut: 'CommandOrControl+Shift+M' },
+    { id: 'contextual-shortcuts', shortcut: 'CommandOrControl+Shift+K' },
     { id: 'preferences', shortcut: 'CommandOrControl+Shift+,' }
   ];
   
@@ -220,142 +225,274 @@ ipcMain.handle('get-app-version', () => {
   return app.getVersion();
 });
 
-// App search handlers
+// Helper function to process apps and send icons in batches
+async function processAndSendIcons(appsToProcess, sourceDescription) {
+  console.log(`[processAndSendIcons] Starting icon processing for ${appsToProcess.length} ${sourceDescription}`);
+  const batchSize = 5; // Increase batch size slightly from 3 to 5
+  
+  // First send all apps without icons to ensure complete list is available
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+    console.log(`[processAndSendIcons] Sending all ${appsToProcess.length} apps without icons first`);
+    mainWindow.webContents.send('all-apps-no-icons', appsToProcess);
+  }
+  
+  for (let i = 0; i < appsToProcess.length; i += batchSize) {
+    const batch = appsToProcess.slice(i, i + batchSize);
+    console.log(`[processAndSendIcons] Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(appsToProcess.length/batchSize)}`);
+
+    const appsWithIcons = await Promise.all(
+      batch.map(async (appInfo) => {
+        const icon = await getAppIcon(appInfo.path);
+        return { ...appInfo, icon: icon || '' }; // Ensure icon is always a string (base64 or empty)
+      })
+    );
+
+    // Send all apps in the batch, even if icon wasn't found
+    if (appsWithIcons.length > 0) {
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+        mainWindow.webContents.send('updated-app-icons', appsWithIcons);
+      }
+    }
+    await new Promise(r => setTimeout(r, 200)); // Slightly reduce delay between batches
+  }
+  console.log(`[processAndSendIcons] Finished icon processing for ${sourceDescription}`);
+}
+
 ipcMain.handle('get-applications', async () => {
-  // For macOS
   if (process.platform === 'darwin') {
-    return new Promise((resolve, reject) => {
-      try {
-        console.log('Starting application search...');
-        // Simpler and more reliable approach for macOS
-        exec('ls -1 /Applications | grep .app', async (error, stdout, stderr) => {
+    try {
+      console.log('[get-applications] Starting application search...');
+      const mainAppsPromise = new Promise((resolve, reject) => {
+        exec('ls -1 /Applications | grep .app', (error, stdout) => {
           if (error) {
-            console.error(`Error getting applications: ${error}`);
-            // Try alternate location
-            try {
-              exec('ls -1 /System/Applications | grep .app', async (error2, stdout2, stderr2) => {
-                if (error2) {
-                  console.error(`Error getting system applications: ${error2}`);
-                  resolve([]); // Return empty array instead of reject to prevent crashes
-                  return;
-                }
-                try {
-                  processApps(stdout2, '/System/Applications', resolve, reject);
-                } catch (processError) {
-                  console.error('Error processing system apps:', processError);
-                  resolve([]);
-                }
-              });
-            } catch (execError) {
-              console.error('Exec error with system apps:', execError);
-              resolve([]);
-            }
-            return;
+            console.error('[get-applications] Error getting /Applications:', error.message);
+            return resolve([]); // Resolve with empty on error
           }
-          
-          try {
-            processApps(stdout, '/Applications', resolve, reject);
-          } catch (processError) {
-            console.error('Error processing apps:', processError);
+          const appNames = stdout.split('\n').filter(Boolean);
+          console.log(`[get-applications] Found ${appNames.length} apps in /Applications`);
+          const appInfos = appNames.map(appName => ({
+            name: appName.replace('.app', '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ').trim(),
+            path: `/Applications/${appName}`,
+            icon: '' // Initially no icon
+          }));
+          resolve(appInfos);
+        });
+      });
+
+      const systemAppsPromise = new Promise((resolve, reject) => {
+         exec('ls -1 /System/Applications | grep .app', (error, stdout) => {
+          if (error) {
+            console.error('[get-applications] Error getting /System/Applications:', error.message);
+            return resolve([]);
+          }
+          const appNames = stdout.split('\n').filter(Boolean);
+          console.log(`[get-applications] Found ${appNames.length} apps in /System/Applications`);
+          const appInfos = appNames.map(appName => ({
+            name: appName.replace('.app', '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ').trim(),
+            path: `/System/Applications/${appName}`,
+            icon: ''
+          }));
+          resolve(appInfos);
+        });
+      });
+      
+      const userAppsPromise = new Promise((resolve, reject) => {
+        const userAppsDir = path.join(app.getPath('home'), 'Applications');
+        if (fs.existsSync(userAppsDir)) {
+            exec(`ls -1 "${userAppsDir}" | grep .app`, (error, stdout) => {
+                if (error) {
+                    console.error(`[get-applications] Error getting ${userAppsDir}:`, error.message);
+                    return resolve([]);
+                }
+                const appNames = stdout.split('\n').filter(Boolean);
+                console.log(`[get-applications] Found ${appNames.length} apps in ${userAppsDir}`);
+                const appInfos = appNames.map(appName => ({
+                    name: appName.replace('.app', '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ').trim(),
+                    path: path.join(userAppsDir, appName),
+                    icon: ''
+                }));
+                resolve(appInfos);
+            });
+        } else {
             resolve([]);
           }
         });
-      } catch (outerError) {
-        console.error('Outer error in get-applications:', outerError);
-        resolve([]);
+
+      const [mainApps, systemApps, userApps] = await Promise.all([
+        mainAppsPromise,
+        systemAppsPromise,
+        userAppsPromise
+      ]);
+      
+      let allApps = [...mainApps, ...systemApps, ...userApps];
+
+      // Remove duplicates by path
+      const uniqueAppsMap = new Map();
+      allApps.forEach(appInfo => uniqueAppsMap.set(appInfo.path, appInfo));
+      allApps = Array.from(uniqueAppsMap.values());
+      
+      // Sort alphabetically by name - convert to lowercase for proper sorting
+      allApps.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+
+      console.log(`[get-applications] Total unique apps found: ${allApps.length}`);
+      
+      // Log first 10 and last 10 apps to debug
+      if (allApps.length > 0) {
+        console.log('[get-applications] First 10 apps:', allApps.slice(0, 10).map(a => a.name));
+        if (allApps.length > 10) {
+          console.log('[get-applications] Last 10 apps:', allApps.slice(-10).map(a => a.name));
+        }
       }
-    });
-  } else {
-    // Fallback for other platforms
-    console.log('Non-macOS platform detected, returning empty app list');
+
+      // Send the initial list (without icons) to the renderer immediately
+      // Then, start fetching icons in the background.
+      processAndSendIcons([...allApps], 'all applications').catch(err => {
+        console.error("[get-applications] Error in background icon processing:", err);
+      });
+      
+      return allApps; // Return apps without icons first
+
+    } catch (error) {
+      console.error('[get-applications] Outer error:', error.message);
     return [];
+    }
   }
+  console.log('[get-applications] Non-macOS platform, returning empty app list.');
+  return [];
 });
 
 // Helper function to get macOS app icon
 async function getAppIcon(appPath) {
   try {
-    // Check if app path exists
+    // 1. Check if the path actually exists before trying to get an icon
     if (!fs.existsSync(appPath)) {
-      console.log(`App path does not exist: ${appPath}`);
+      console.warn(`[getAppIcon] Path does not exist: ${appPath}`);
+      return null;
+    }
+
+    // Don't try to process directories that aren't .app bundles
+    if (!appPath.endsWith('.app')) {
+      console.warn(`[getAppIcon] Not an app bundle: ${appPath}`);
       return null;
     }
     
-    // Use a simpler approach with Electron's built-in getFileIcon
-    // to avoid crashes with the more complex icon extraction
-    try {
-      console.log(`Getting icon for app: ${appPath}`);
-      const iconNative = await app.getFileIcon(appPath, { size: 'large' });
-      return iconNative.toPNG().toString('base64');
-    } catch (iconError) {
-      console.error(`Error getting icon with Electron method: ${iconError}`);
+    // 2. Find Info.plist inside the .app bundle
+    const infoPlistPath = path.join(appPath, 'Contents', 'Info.plist');
+    if (!fs.existsSync(infoPlistPath)) {
+      console.warn(`[getAppIcon] Info.plist not found for: ${appPath}`);
+      // Fall back to Electron's getFileIcon if no Info.plist
+      try {
+        const iconNative = await app.getFileIcon(appPath, { size: 'normal' });
+        if (iconNative && !iconNative.isEmpty()) {
+        const iconBase64 = `data:image/png;base64,${iconNative.toPNG().toString('base64')}`;
+        return iconBase64;
+        }
+      } catch (err) {
+        // Ignore errors in fallback
+      }
       return null;
     }
+
+    // 3. Parse the Info.plist
+    const plistContent = fs.readFileSync(infoPlistPath, 'utf8');
+    let info;
+    try {
+      info = plist.parse(plistContent);
+    } catch (plistError) {
+      console.error(`[getAppIcon] Error parsing Info.plist for ${appPath}: ${plistError.message}`);
+    return null;
+  }
+
+    // 4. Get the icon file name
+    let iconFile = info.CFBundleIconFile || '';
+    if (!iconFile && info.CFBundleIcons && info.CFBundleIcons.CFBundlePrimaryIcon) {
+      iconFile = info.CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconFiles?.[0] || '';
+    }
+
+    // Add .icns extension if not present
+    if (iconFile && !iconFile.endsWith('.icns')) {
+      iconFile = `${iconFile}.icns`;
+    }
+
+    // If no icon file found in plist
+    if (!iconFile) {
+      console.warn(`[getAppIcon] No icon file found in Info.plist for: ${appPath}`);
+      // Try with the app name
+      const appName = path.basename(appPath, '.app');
+      iconFile = `${appName}.icns`;
+    }
+
+    // 5. Find the icon file in Resources
+    const resourcesPath = path.join(appPath, 'Contents', 'Resources');
+    const iconPath = path.join(resourcesPath, iconFile);
+
+    if (!fs.existsSync(iconPath)) {
+      console.warn(`[getAppIcon] Icon file not found at: ${iconPath}`);
+      
+      // Try to find any .icns file in Resources
+      try {
+        const files = fs.readdirSync(resourcesPath);
+        const icnsFiles = files.filter(file => file.endsWith('.icns'));
+        if (icnsFiles.length > 0) {
+          const alternatePath = path.join(resourcesPath, icnsFiles[0]);
+          console.log(`[getAppIcon] Found alternative icon: ${alternatePath}`);
+          return await extractIcns(alternatePath);
+        }
+      } catch (dirError) {
+        console.error(`[getAppIcon] Error reading Resources dir: ${dirError.message}`);
+      }
+      
+      // Fall back to electron's getFileIcon as last resort
+      try {
+        const iconNative = await app.getFileIcon(appPath, { size: 'normal' });
+        if (iconNative && !iconNative.isEmpty()) {
+          const iconBase64 = `data:image/png;base64,${iconNative.toPNG().toString('base64')}`;
+          return iconBase64;
+        }
+      } catch (err) {
+        // Ignore errors in fallback
+      }
+      
+      return null;
+    }
+
+    // 6. Extract PNG from ICNS and convert to base64
+    return await extractIcns(iconPath);
+    
   } catch (error) {
-    console.error(`Error in getAppIcon for ${appPath}: ${error}`);
+    console.error(`[getAppIcon] General error for ${appPath}: ${error.message}`);
     return null;
   }
 }
 
-// Helper function to process applications
-async function processApps(stdout, basePath, resolve, reject) {
+// Helper function to extract icons from ICNS files
+async function extractIcns(iconPath) {
   try {
-    const appNames = stdout.split('\n').filter(Boolean);
+    // Read the ICNS file
+    const iconBuffer = fs.readFileSync(iconPath);
     
-    // First create the app list without icons
-    const appInfos = appNames.map(appName => {
-      // Clean app name for display
-      const cleanName = appName.replace('.app', '')
-        .replace(/([a-z])([A-Z])/g, '$1 $2') // Add spaces between camelCase
-        .replace(/[-_]/g, ' ') // Replace hyphens and underscores with spaces
-        .trim();
-      
-      const fullPath = `${basePath}/${appName}`;
-      
-      return {
-        name: cleanName,
-        path: fullPath,
-        icon: '' // Start with empty icon
-      };
-    });
+    // Parse the ICNS file
+    const icns = Icns.from(iconBuffer);
     
-    // Process system apps first without waiting for icons
-    resolve(appInfos);
-    
-    // Then try to get icons in the background
-    // This approach prevents the app from crashing if icon loading fails
-    try {
-      // Get apps from user Applications folder
-      exec('ls -1 ~/Applications | grep .app', async (error, userStdout) => {
-        if (!error && userStdout) {
-          const userAppNames = userStdout.split('\n').filter(Boolean);
-          const userAppInfos = userAppNames.map(appName => {
-            const cleanName = appName.replace('.app', '')
-              .replace(/([a-z])([A-Z])/g, '$1 $2')
-              .replace(/[-_]/g, ' ')
-              .trim();
-            
-            const fullPath = `${process.env.HOME}/Applications/${appName}`;
-            
-            return {
-              name: cleanName,
-              path: fullPath,
-              icon: '' // Start with empty icon
-            };
-          });
-          
-          // Send this additional list to the renderer
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('additional-apps', userAppInfos);
-          }
-        }
-      });
-    } catch (error) {
-      console.error('Error getting user applications:', error);
+    // Get the largest image (usually the first one)
+    if (!icns.images || icns.images.length === 0) {
+      return null;
     }
-  } catch (err) {
-    console.error('Error processing applications:', err);
-    resolve([]);
+    
+    // Sort by size and get the largest
+    const sortedImages = [...icns.images].sort((a, b) => 
+      (b.width * b.height) - (a.width * a.height)
+    );
+    
+    // Get the PNG data from the largest image
+    const pngBuffer = sortedImages[0].data;
+    
+    // Convert to base64 data URL
+    const base64 = pngBuffer.toString('base64');
+    return `data:image/png;base64,${base64}`;
+    } catch (error) {
+    console.error(`[extractIcns] Error extracting icon from ${iconPath}: ${error.message}`);
+    return null;
   }
 }
 
@@ -376,5 +513,158 @@ ipcMain.handle('launch-application', async (event, appPath) => {
   } catch (error) {
     console.error('Error launching application:', error);
     return false;
+  }
+});
+
+// Get menu items from active application (macOS only)
+ipcMain.handle('get-menu-items', async () => {
+  if (process.platform !== 'darwin') {
+    return { error: 'This feature is only available on macOS' };
+  }
+
+  try {
+    // AppleScript to get menu items from the frontmost application
+    const script = `
+    tell application "System Events"
+      set frontApp to first application process whose frontmost is true
+      set appName to name of frontApp
+      
+      set menuItems to {}
+      set menuNames to {}
+      
+      tell process appName
+        set topMenus to menu bars's menu bar items
+        
+        repeat with topMenu in topMenus
+          set topMenuName to name of topMenu
+          
+          -- Get submenus
+          set theMenu to menu of topMenu
+          set menuItems to menuItems & getMenuItems(theMenu, topMenuName, "")
+        end repeat
+      end tell
+      
+      return {appName, menuItems}
+    end tell
+    
+    on getMenuItems(theMenu, menuPath, indent)
+      set allItems to {}
+      
+      repeat with menuItem in menu items of theMenu
+        set itemName to name of menuItem
+        
+        if itemName is not "" and itemName is not "-" then
+          set fullPath to menuPath & " → " & itemName
+          set itemEntry to {name:itemName, path:fullPath, hasSubMenu:false, enabled:true}
+          
+          try
+            set itemEnabled to enabled of menuItem
+            set itemEntry to {name:itemName, path:fullPath, hasSubMenu:false, enabled:itemEnabled}
+          end try
+          
+          copy itemEntry to end of allItems
+          
+          -- Check for submenus
+          try
+            set subMenu to menu of menuItem
+            set itemEntry's hasSubMenu to true
+            
+            -- Get items from submenu
+            set subItems to getMenuItems(subMenu, fullPath, indent & "  ")
+            set allItems to allItems & subItems
+          end try
+        end if
+      end repeat
+      
+      return allItems
+    end getMenuItems
+    `;
+
+    return new Promise((resolve, reject) => {
+      exec(`osascript -e '${script}'`, { maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
+        if (error) {
+          console.error('Error getting menu items:', error);
+          reject({ error: 'Failed to get menu items: ' + error.message });
+          return;
+        }
+        
+        try {
+          // Parse the output, which should be in the format: {appName:"AppName", menuItems:[{...}, ...]}
+          const result = JSON.parse(stdout.replace(/[\r\n]/g, ''));
+          resolve(result);
+        } catch (parseError) {
+          console.error('Error parsing menu items:', parseError);
+          reject({ error: 'Failed to parse menu items' });
+        }
+      });
+    });
+  } catch (error) {
+    console.error('Error fetching menu items:', error);
+    return { error: 'Failed to get menu items: ' + error.message };
+  }
+});
+
+// Execute menu item in active application (macOS only)
+ipcMain.handle('execute-menu-item', async (event, menuPath) => {
+  if (process.platform !== 'darwin') {
+    return { error: 'This feature is only available on macOS' };
+  }
+
+  try {
+    // Convert the menu path into AppleScript commands
+    const menuComponents = menuPath.split(' → ');
+    if (menuComponents.length < 2) {
+      return { error: 'Invalid menu path' };
+    }
+
+    // Build AppleScript to click the specified menu item
+    let script = `
+    tell application "System Events"
+      set frontApp to first application process whose frontmost is true
+      tell process (name of frontApp)
+        tell menu bar 1
+          click menu bar item "${menuComponents[0]}"
+          tell menu 1
+    `;
+
+    // Build nested tell blocks for each submenu level
+    for (let i = 1; i < menuComponents.length - 1; i++) {
+      script += `
+            click menu item "${menuComponents[i]}"
+            tell menu 1
+      `;
+    }
+
+    // Add the final click command
+    script += `
+              click menu item "${menuComponents[menuComponents.length - 1]}"
+    `;
+
+    // Close all the tell blocks
+    for (let i = 0; i < menuComponents.length; i++) {
+      script += `
+            end tell
+      `;
+    }
+
+    script += `
+        end tell
+      end tell
+    end tell
+    `;
+
+    return new Promise((resolve, reject) => {
+      exec(`osascript -e '${script}'`, (error, stdout, stderr) => {
+        if (error) {
+          console.error('Error executing menu item:', error);
+          reject({ error: 'Failed to execute menu item: ' + error.message });
+          return;
+        }
+        resolve({ success: true });
+      });
+    });
+  } catch (error) {
+    console.error('Error executing menu item:', error);
+    return { error: 'Failed to execute menu item: ' + error.message };
   }
 });

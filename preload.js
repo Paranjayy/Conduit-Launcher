@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('electron', {
     getAppVersion: () => ipcRenderer.invoke('get-app-version'),
     getApplications: () => ipcRenderer.invoke('get-applications'),
     launchApplication: (appPath) => ipcRenderer.invoke('launch-application', appPath),
+    getMenuItems: () => ipcRenderer.invoke('get-menu-items'),
+    executeMenuItem: (menuPath) => ipcRenderer.invoke('execute-menu-item', menuPath),
     onAdditionalApps: (callback) => {
       const additionalAppsListener = (_, apps) => callback(apps);
       ipcRenderer.on('additional-apps', additionalAppsListener);
@@ -27,6 +29,24 @@ contextBridge.exposeInMainWorld('electron', {
       // Return a cleanup function
       return () => {
         ipcRenderer.removeListener('additional-apps', additionalAppsListener);
+      };
+    },
+    onUpdatedAppIcons: (callback) => {
+      const updatedIconsListener = (_, apps) => callback(apps);
+      ipcRenderer.on('updated-app-icons', updatedIconsListener);
+      
+      // Return a cleanup function
+      return () => {
+        ipcRenderer.removeListener('updated-app-icons', updatedIconsListener);
+      };
+    },
+    onAllAppsNoIcons: (callback) => {
+      const allAppsListener = (_, apps) => callback(apps);
+      ipcRenderer.on('all-apps-no-icons', allAppsListener);
+      
+      // Return a cleanup function
+      return () => {
+        ipcRenderer.removeListener('all-apps-no-icons', allAppsListener);
       };
     }
   },
