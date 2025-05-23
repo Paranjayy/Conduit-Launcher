@@ -37,24 +37,41 @@ export function MenuSearch({ onViewChange }: MenuSearchProps) {
       setError(null);
       
       try {
-        if (typeof window !== 'undefined' && window.electron?.app?.getMenuItems) {
-          const result = await window.electron.app.getMenuItems() as MenuData | { error: string };
+        console.log('[MenuSearch] Attempting to fetch menu items...');
+        
+        // Try both possible API paths
+        let getMenuItemsFunc = null;
+        if (typeof window !== 'undefined' && window.electron) {
+          if (window.electron.app?.getMenuItems) {
+            getMenuItemsFunc = window.electron.app.getMenuItems;
+          } else if (window.electron.menu?.getItems) {
+            getMenuItemsFunc = window.electron.menu.getItems;
+          }
+        }
+        
+        if (getMenuItemsFunc) {
+          console.log('[MenuSearch] Found menu API, calling...');
+          const result = await getMenuItemsFunc() as MenuData | { error: string };
+          console.log('[MenuSearch] Menu API result:', result);
           
           if ('error' in result) {
+            console.error('[MenuSearch] API returned error:', result.error);
             setError(result.error);
             setMenuItems([]);
             setActiveApp(null);
           } else {
+            console.log(`[MenuSearch] Successfully loaded ${result.menuItems?.length || 0} menu items for app: ${result.appName}`);
             setMenuItems(result.menuItems || []);
             setActiveApp(result.appName || 'Unknown');
           }
         } else {
-          setError('Menu search is only available in the Electron app');
+          console.error('[MenuSearch] Menu API not available');
+          setError('Menu search is only available in the Electron app on macOS');
           setMenuItems([]);
         }
       } catch (err) {
-        console.error('Error fetching menu items:', err);
-        setError('Failed to fetch menu items');
+        console.error('[MenuSearch] Error fetching menu items:', err);
+        setError(`Failed to fetch menu items: ${err instanceof Error ? err.message : 'Unknown error'}`);
         setMenuItems([]);
       } finally {
         setIsLoading(false);
@@ -138,28 +155,45 @@ export function MenuSearch({ onViewChange }: MenuSearchProps) {
   
   const executeMenuItem = async (menuItem: MenuItem) => {
     if (!menuItem.enabled) {
-      // Don't try to execute disabled menu items
+      console.log('[MenuSearch] Menu item is disabled, skipping execution:', menuItem.name);
       return;
     }
     
     try {
       setIsLoading(true);
+      console.log('[MenuSearch] Executing menu item:', menuItem.path);
       
-      if (typeof window !== 'undefined' && window.electron?.app?.executeMenuItem) {
-        const result = await window.electron.app.executeMenuItem(menuItem.path) as { success: boolean } | { error: string };
+      // Try both possible API paths
+      let executeMenuItemFunc = null;
+      if (typeof window !== 'undefined' && window.electron) {
+        if (window.electron.app?.executeMenuItem) {
+          executeMenuItemFunc = window.electron.app.executeMenuItem;
+        } else if (window.electron.menu?.executeItem) {
+          executeMenuItemFunc = window.electron.menu.executeItem;
+        }
+      }
+      
+      if (executeMenuItemFunc) {
+        const result = await executeMenuItemFunc(menuItem.path) as { success: boolean } | { error: string };
+        console.log('[MenuSearch] Execute result:', result);
         
         if ('error' in result) {
+          console.error('[MenuSearch] Execute failed:', result.error);
           setError(`Failed to execute: ${result.error}`);
         } else {
+          console.log('[MenuSearch] Menu item executed successfully');
           // Hide the app after executing the menu item
           setTimeout(() => {
             onViewChange('command');
           }, 300);
         }
+      } else {
+        console.error('[MenuSearch] Execute API not available');
+        setError('Menu execution is not available');
       }
     } catch (err) {
-      console.error('Error executing menu item:', err);
-      setError('Failed to execute menu item');
+      console.error('[MenuSearch] Error executing menu item:', err);
+      setError(`Failed to execute menu item: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setIsLoading(false);
     }

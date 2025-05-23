@@ -1,10 +1,10 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { 
   ArrowLeft, Send, Plus, Settings, MessageSquare, 
   MoreVertical, Trash, Edit, User, Bot, Sparkles, 
-  Loader2, Copy, Check, X, ChevronDown
+  Loader2, Copy, Check, X, ChevronDown, Trash2, Download, Upload
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -54,6 +54,13 @@ interface AIChatProps {
   onViewChange: (view: ViewType) => void;
 }
 
+interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+}
+
 export function AIChat({ onViewChange }: AIChatProps) {
   const { 
     chats, 
@@ -84,6 +91,14 @@ export function AIChat({ onViewChange }: AIChatProps) {
   })
   
   const currentChat = chats.find(c => c.id === activeChat)
+  
+  const [messages, setMessages] = useState<Message[]>([])
+  const [localIsLoading, setLocalIsLoading] = useState(false)
+  const [isTyping, setIsTyping] = useState(false)
+  
+  // Use store state instead of local state for messages when we have a current chat
+  const displayMessages = currentChat ? currentChat.messages : messages
+  const displayIsLoading = currentChat ? isLoading : localIsLoading
   
   // Scroll to bottom of messages when they change or when loading changes
   useEffect(() => {
@@ -131,10 +146,7 @@ export function AIChat({ onViewChange }: AIChatProps) {
   
   // Handle send message
   const handleSendMessage = () => {
-    if (!activeChat || !input.trim()) return
-    
-    sendMessage(activeChat, input.trim())
-    setInput("")
+    handleSend(); // Use our local mock function
   }
   
   // Handle chat title update
@@ -162,6 +174,122 @@ export function AIChat({ onViewChange }: AIChatProps) {
     setTimeout(() => setCopiedMessageId(null), 2000)
   }
   
+  // Sample responses for different types of queries
+  const mockResponses = {
+    coding: [
+      "Here's a solution to your coding problem:\n\n```javascript\nfunction example() {\n  // Your code here\n  return result;\n}\n```\n\nThis approach uses modern JavaScript features for better performance.",
+      "I can help you with that! Here's how you might approach this:\n\n1. First, analyze the requirements\n2. Choose the right data structure\n3. Implement the algorithm\n4. Test with edge cases\n\nWould you like me to elaborate on any of these steps?",
+      "That's a great question! In this case, you might want to consider:\n\n• Performance implications\n• Memory usage\n• Maintainability\n• Browser compatibility\n\nLet me know if you'd like a specific implementation example."
+    ],
+    general: [
+      "I understand what you're looking for. Let me break this down for you:\n\n✨ Here are the key points to consider...",
+      "That's an interesting question! Based on current best practices, I'd recommend...",
+      "Great question! Here's what I think about that:\n\n• Point 1: Important consideration\n• Point 2: Another key factor\n• Point 3: Final thought\n\nWhat are your thoughts on this approach?",
+      "I can definitely help with that! Here's a comprehensive approach:\n\n1. Start with the basics\n2. Build incrementally\n3. Test thoroughly\n4. Iterate based on feedback\n\nWould you like me to dive deeper into any of these areas?"
+    ],
+    creative: [
+      "Here's a creative approach to that challenge:\n\n🎨 **Idea 1**: Think outside the box...\n🎨 **Idea 2**: Consider the user's perspective...\n🎨 **Idea 3**: What if we tried...\n\nWhich direction interests you most?",
+      "I love creative challenges! Here are some brainstorming ideas:\n\n• Unconventional solution A\n• Innovative approach B  \n• Disruptive method C\n\nLet's explore whichever resonates with you!",
+      "That's a fascinating creative problem! Consider these angles:\n\n✨ **Artistic approach**: ...\n✨ **Technical innovation**: ...\n✨ **User experience focus**: ...\n\nWhat appeals to your creative vision?"
+    ]
+  };
+
+  // Mock AI response generation
+  const generateResponse = (userMessage: string): string => {
+    const lowerMessage = userMessage.toLowerCase();
+    
+    // Determine response category
+    let category: keyof typeof mockResponses = 'general';
+    
+    if (lowerMessage.includes('code') || lowerMessage.includes('javascript') || 
+        lowerMessage.includes('programming') || lowerMessage.includes('function') ||
+        lowerMessage.includes('react') || lowerMessage.includes('typescript')) {
+      category = 'coding';
+    } else if (lowerMessage.includes('creative') || lowerMessage.includes('design') ||
+               lowerMessage.includes('idea') || lowerMessage.includes('brainstorm')) {
+      category = 'creative';
+    }
+    
+    // Get random response from category
+    const responses = mockResponses[category];
+    return responses[Math.floor(Math.random() * responses.length)];
+  };
+
+  // Handle sending message
+  const handleSend = async () => {
+    if (!input.trim() || localIsLoading) return;
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: input.trim(),
+      timestamp: new Date()
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setInput("");
+    setLocalIsLoading(true);
+    setIsTyping(true);
+
+    try {
+      // Check if we have a real API key and provider
+      if (activeProvider?.apiKey && currentChat) {
+        // Use real API
+        await sendMessage(currentChat.id, userMessage.content);
+      } else {
+        // Fallback to mock response
+        console.log('[AI Chat] No API key found, using mock response');
+        setTimeout(() => {
+          const response = generateResponse(userMessage.content);
+          const assistantMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: response,
+            timestamp: new Date()
+          };
+
+          setMessages(prev => [...prev, assistantMessage]);
+          setLocalIsLoading(false);
+          setIsTyping(false);
+        }, 1000 + Math.random() * 2000); // 1-3 seconds delay
+      }
+    } catch (error) {
+      console.error('[AI Chat] Error sending message:', error);
+      setLocalIsLoading(false);
+      setIsTyping(false);
+      
+      // Add error message
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: `Sorry, I encountered an error: ${error instanceof Error ? error.message : 'Unknown error'}. Using mock response instead.`,
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMessage]);
+      
+      // Fall back to mock response after error
+      setTimeout(() => {
+        const response = generateResponse(userMessage.content);
+        const assistantMessage: Message = {
+          id: (Date.now() + 2).toString(),
+          role: 'assistant',
+          content: response,
+          timestamp: new Date()
+        };
+
+        setMessages(prev => [...prev, assistantMessage]);
+      }, 1000);
+    }
+  };
+
+  // Handle input key down for sending
+  const handleInputKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
   // Render chat message
   const renderMessage = (message: any) => {
     return (
@@ -510,8 +638,8 @@ export function AIChat({ onViewChange }: AIChatProps) {
                 </div>
               ) : (
                 <div>
-                  {currentChat.messages.map(renderMessage)}
-                  {isLoading && renderLoadingIndicator()}
+                  {displayMessages.map(renderMessage)}
+                  {displayIsLoading && renderLoadingIndicator()}
                   {error && renderErrorMessage()}
                   <div ref={messagesEndRef} />
                 </div>
@@ -526,22 +654,17 @@ export function AIChat({ onViewChange }: AIChatProps) {
                   placeholder="Type a message... (press / to focus)"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault()
-                      handleSendMessage()
-                    }
-                  }}
+                  onKeyDown={handleInputKeyDown}
                   className="pr-10 min-h-[100px] resize-none"
                 />
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={handleSendMessage}
-                  disabled={!input.trim() || isLoading || !activeProvider?.apiKey}
+                  onClick={handleSend}
+                  disabled={!input.trim() || localIsLoading}
                   className={cn(
                     "absolute right-2 bottom-2 h-8 w-8",
-                    input.trim() && activeProvider?.apiKey ? "text-primary" : "text-muted-foreground"
+                    !input.trim() || localIsLoading ? "opacity-50" : "opacity-100"
                   )}
                 >
                   <Send className="h-4 w-4" />
