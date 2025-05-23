@@ -67,7 +67,6 @@ export function FocusSession({ onViewChange }: FocusSessionProps) {
   const [activeTab, setActiveTab] = useState("timer");
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Load sessions from localStorage
   useEffect(() => {
@@ -78,6 +77,11 @@ export function FocusSession({ onViewChange }: FocusSessionProps) {
       }
     } catch (error) {
       console.error("Failed to load sessions:", error);
+    }
+
+    // Request notification permission
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
     }
   }, []);
 
@@ -162,17 +166,36 @@ export function FocusSession({ onViewChange }: FocusSessionProps) {
 
       setSessionState("completed");
 
-      // Play completion sound (if available)
-      if (audioRef.current) {
-        audioRef.current.play().catch(() => {});
+      // Play completion sound using Web Audio API
+      try {
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        oscillator.frequency.value = 800;
+        oscillator.type = 'sine';
+        
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+        
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.5);
+      } catch (error) {
+        console.warn('Could not play completion sound:', error);
       }
 
       // Show notification
       if ("Notification" in window && Notification.permission === "granted") {
         new Notification("Focus Session Complete!", {
           body: `Your ${currentSession.duration}-minute session is finished.`,
-          icon: "/icon.png",
+          icon: "/placeholder-logo.png",
         });
+      } else if ("Notification" in window && Notification.permission === "default") {
+        // Request permission for future notifications
+        Notification.requestPermission();
       }
     }
   };
@@ -209,13 +232,6 @@ export function FocusSession({ onViewChange }: FocusSessionProps) {
         new Date(session.endTime).toDateString() === today,
     );
   };
-
-  // Request notification permission
-  useEffect(() => {
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
-  }, []);
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -446,14 +462,6 @@ export function FocusSession({ onViewChange }: FocusSessionProps) {
           </div>
         </TabsContent>
       </Tabs>
-
-      {/* Hidden audio element for completion sound */}
-      <audio ref={audioRef} preload="auto">
-        <source
-          src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OScTgwOUarm7blmGgU7k9n1unEiBC13yO/eizEIHWq+8+OWT"
-          type="audio/wav"
-        />
-      </audio>
     </div>
   );
 }

@@ -115,8 +115,95 @@ export function WindowManager({ onViewChange }: WindowManagerProps) {
 
   // Apply layout preset
   const applyLayout = (layoutId: string) => {
-    console.log("Applying layout:", layoutId);
-    // In a real implementation, this would arrange windows according to the layout
+    // Get screen dimensions (simplified - in real app would use Electron APIs)
+    const screenWidth = 1920;
+    const screenHeight = 1080;
+    const visibleWindows = windows.filter(w => w.isVisible && !w.isMinimized);
+    
+    if (visibleWindows.length === 0) return;
+
+    switch (layoutId) {
+      case "split-left-right": {
+        const windowWidth = Math.floor(screenWidth / visibleWindows.length);
+        setWindows(prev =>
+          prev.map(window => {
+            if (!window.isVisible || window.isMinimized) return window;
+            const index = visibleWindows.findIndex(w => w.id === window.id);
+            return {
+              ...window,
+              position: { x: index * windowWidth, y: 0 },
+              size: { width: windowWidth, height: screenHeight - 100 }
+            };
+          })
+        );
+        break;
+      }
+      case "split-top-bottom": {
+        const windowHeight = Math.floor((screenHeight - 100) / visibleWindows.length);
+        setWindows(prev =>
+          prev.map(window => {
+            if (!window.isVisible || window.isMinimized) return window;
+            const index = visibleWindows.findIndex(w => w.id === window.id);
+            return {
+              ...window,
+              position: { x: 0, y: index * windowHeight },
+              size: { width: screenWidth, height: windowHeight }
+            };
+          })
+        );
+        break;
+      }
+      case "quarters": {
+        const halfWidth = Math.floor(screenWidth / 2);
+        const halfHeight = Math.floor((screenHeight - 100) / 2);
+        const positions = [
+          { x: 0, y: 0 },
+          { x: halfWidth, y: 0 },
+          { x: 0, y: halfHeight },
+          { x: halfWidth, y: halfHeight }
+        ];
+        setWindows(prev =>
+          prev.map(window => {
+            if (!window.isVisible || window.isMinimized) return window;
+            const index = visibleWindows.findIndex(w => w.id === window.id);
+            const pos = positions[index % positions.length];
+            return {
+              ...window,
+              position: pos,
+              size: { width: halfWidth, height: halfHeight }
+            };
+          })
+        );
+        break;
+      }
+      case "center-focus": {
+        const focusWidth = Math.floor(screenWidth * 0.7);
+        const focusHeight = Math.floor((screenHeight - 100) * 0.8);
+        setWindows(prev =>
+          prev.map(window => {
+            if (!window.isVisible || window.isMinimized) return window;
+            const index = visibleWindows.findIndex(w => w.id === window.id);
+            if (index === 0) {
+              // Center the first window
+              return {
+                ...window,
+                position: {
+                  x: Math.floor((screenWidth - focusWidth) / 2),
+                  y: Math.floor((screenHeight - focusHeight) / 2)
+                },
+                size: { width: focusWidth, height: focusHeight }
+              };
+            } else {
+              // Minimize other windows
+              return { ...window, isMinimized: true };
+            }
+          })
+        );
+        break;
+      }
+      default:
+        console.warn('Unknown layout:', layoutId);
+    }
   };
 
   // Window actions
@@ -156,8 +243,15 @@ export function WindowManager({ onViewChange }: WindowManagerProps) {
   };
 
   const createNewSpace = () => {
+    // Limit to 10 spaces maximum
+    if (spaces.length >= 10) {
+      console.warn('Maximum number of spaces reached');
+      return;
+    }
+
+    const maxId = Math.max(...spaces.map(s => s.id), 0);
     const newSpace = {
-      id: spaces.length + 1,
+      id: maxId + 1,
       name: `Space ${spaces.length + 1}`,
       active: false,
       windows: 0,
@@ -357,15 +451,34 @@ export function WindowManager({ onViewChange }: WindowManagerProps) {
             <div className="border-t pt-4 mt-6">
               <h4 className="font-medium mb-3">Quick Actions</h4>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => applyLayout('split-left-right')}
+                >
                   <Move className="h-4 w-4 mr-2" />
                   Tile All Windows
                 </Button>
-                <Button variant="outline" size="sm">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => windows.forEach(w => minimizeWindow(w.id))}
+                >
                   <Minimize2 className="h-4 w-4 mr-2" />
                   Minimize All
                 </Button>
-                <Button variant="outline" size="sm">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => {
+                    // Cycle through windows (bring next window to front)
+                    const visibleWindows = windows.filter(w => w.isVisible && !w.isMinimized);
+                    if (visibleWindows.length > 0) {
+                      // In a real implementation, this would cycle window focus
+                      console.log('Cycling through windows:', visibleWindows.map(w => w.title));
+                    }
+                  }}
+                >
                   <RotateCw className="h-4 w-4 mr-2" />
                   Cycle Windows
                 </Button>

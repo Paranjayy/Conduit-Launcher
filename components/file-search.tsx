@@ -170,7 +170,9 @@ export function FileSearch({ onViewChange }: FileSearchProps) {
 
   // Copy file path to clipboard
   const copyPath = (file: FileResult) => {
-    navigator.clipboard.writeText(file.path);
+    navigator.clipboard.writeText(file.path).catch((error) => {
+      console.error('Failed to copy path to clipboard:', error);
+    });
   };
 
   // Format file size
@@ -181,12 +183,35 @@ export function FileSearch({ onViewChange }: FileSearchProps) {
     return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
   };
 
-  // Get file icon based on extension
+  // Get file icon based on extension with better icons
   const getFileIcon = (file: FileResult) => {
     if (file.type === "folder") {
       return <Folder className="h-5 w-5 text-blue-400" />;
     }
-    return <File className="h-5 w-5 text-gray-400" />;
+    
+    const ext = file.extension?.toLowerCase();
+    switch (ext) {
+      case 'tsx':
+      case 'ts':
+      case 'js':
+      case 'jsx':
+        return <File className="h-5 w-5 text-yellow-400" />;
+      case 'md':
+        return <File className="h-5 w-5 text-blue-300" />;
+      case 'json':
+        return <File className="h-5 w-5 text-green-400" />;
+      case 'css':
+      case 'scss':
+        return <File className="h-5 w-5 text-purple-400" />;
+      case 'png':
+      case 'jpg':
+      case 'jpeg':
+      case 'gif':
+      case 'svg':
+        return <File className="h-5 w-5 text-pink-400" />;
+      default:
+        return <File className="h-5 w-5 text-gray-400" />;
+    }
   };
 
   return (

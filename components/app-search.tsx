@@ -51,11 +51,6 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
   // Memoize the provider instance
   const appSearchProvider = useMemo(() => new AppSearchProvider(), []);
 
-  // Test base64 image to verify if base64 images work at all
-  const testBase64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
-  
-  // Hardcoded test with a real macOS app icon (System Preferences icon as base64)
-
   // Handle clicks outside the dropdown to close it
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -266,71 +261,37 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
 
   const renderAppIcon = (searchResult: SearchResult) => {
     const appPath = searchResult.metadata?.path || searchResult.id;
-    const iconData = searchResult.metadata?.rawIcon || searchResult.icon; // Try both rawIcon and icon
+    const iconData = searchResult.metadata?.rawIcon || searchResult.icon;
 
-    // Enhanced logging for debugging
-    console.log(`[AppSearch] Rendering icon for ${searchResult.title}:`, {
-      hasIconData: !!iconData,
-      iconDataType: typeof iconData,
-      iconDataLength: iconData?.length || 0,
-      isFailed: failedIcons.has(appPath),
-      appPath,
-      iconDataPrefix: iconData?.substring(0, 50) || 'no data'
-    });
-
-    // Check if icon failed before
+    // If icon failed before, use fallback immediately
     if (failedIcons.has(appPath)) {
-      console.log(`[AppSearch] Using fallback icon for ${searchResult.title} (previously failed)`);
       return <Laptop className="h-6 w-6 text-blue-400" />;
     }
 
     // Check if we have valid icon data
-    if (!iconData || typeof iconData !== 'string') {
-      console.log(`[AppSearch] No valid icon data for ${searchResult.title}`);
-      return <Laptop className="h-6 w-6 text-blue-400" />;
+    if (!iconData || typeof iconData !== 'string' || iconData.length < 10) {
+      return <Laptop className="h-6 w-6 text-gray-400" />;
     }
 
-    // Ensure the iconData has the proper data URL format
+    // Ensure proper data URL format
     let processedIconData = iconData;
-    
-    // If iconData doesn't start with data:, add the prefix
     if (!iconData.startsWith('data:')) {
       processedIconData = `data:image/png;base64,${iconData}`;
-      console.log(`[AppSearch] Added data URL prefix for ${searchResult.title}`);
     }
-
-    // Validate data URL format
-    try {
-      new URL(processedIconData);
-    } catch (e) {
-      console.error(`[AppSearch] Invalid data URL for ${searchResult.title}:`, e);
-      return <Laptop className="h-6 w-6 text-blue-400" />;
-    }
-
-    console.log(`[AppSearch] Attempting to render image for ${searchResult.title} with ${processedIconData.length} character data URL`);
 
     return (
-      <div className="relative w-6 h-6">
+      <div className="relative w-6 h-6 flex items-center justify-center">
         <img
           src={processedIconData}
           alt={`${searchResult.title} icon`}
-          className="w-full h-full object-contain rounded-sm"
-          onError={(e) => {
-            console.error(`[AppSearch] Image failed to load for ${searchResult.title}:`, {
-              src: processedIconData?.substring(0, 50) + '...',
-              error: e,
-              naturalWidth: (e.target as HTMLImageElement).naturalWidth,
-              naturalHeight: (e.target as HTMLImageElement).naturalHeight
-            });
-            handleImageError(appPath);
-          }}
-          onLoad={(e) => {
-            console.log(`[AppSearch] ✅ Image loaded successfully for ${searchResult.title}:`, {
-              naturalWidth: (e.target as HTMLImageElement).naturalWidth,
-              naturalHeight: (e.target as HTMLImageElement).naturalHeight
-            });
-          }}
+          className="w-full h-full object-contain rounded-sm transition-opacity duration-200"
+          onError={() => handleImageError(appPath)}
           loading="lazy"
+          style={{
+            imageRendering: 'crisp-edges',
+            minWidth: '24px',
+            minHeight: '24px'
+          }}
         />
       </div>
     );
@@ -357,62 +318,7 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
 
   return (
     <div className="flex flex-col h-full bg-gray-950 text-gray-100">
-      <div className="p-4 space-y-2">
-        {/* Icon Test Section */}
-        <div className="text-xs text-gray-500 bg-gray-800 p-2 rounded space-y-2">
-          <div>
-            Debug: Cache size: {appSearchProvider.getCacheStats().totalApps}, 
-            Apps with icons: {appSearchProvider.getCacheStats().appsWithIcons}
-            <button 
-              onClick={() => {
-                console.log('[Debug] Manual refresh triggered');
-                console.log('[Debug] Cache stats:', appSearchProvider.getCacheStats());
-                appSearchProvider.search(searchTerm).then(results => {
-                  console.log('[Debug] Manual search results:', results.length);
-                  results.slice(0, 3).forEach((result, i) => {
-                    console.log(`[Debug] Result ${i}: ${result.title}`, {
-                      hasIcon: !!result.icon,
-                      hasMetadataIcon: !!result.metadata?.rawIcon,
-                      iconLength: result.metadata?.rawIcon?.length || 0,
-                      iconPrefix: result.metadata?.rawIcon?.substring(0, 30) || 'no icon'
-                    });
-                  });
-                  setFilteredApps(results);
-                });
-              }}
-              className="ml-2 px-2 py-1 bg-blue-600 text-white rounded text-xs"
-            >
-              Refresh
-            </button>
-          </div>
-          
-          {/* Test base64 image to verify if images work at all */}
-          <div className="flex items-center space-x-2">
-            <span>Test tiny image:</span>
-            <img 
-              src={testBase64} 
-              alt="test" 
-              className="w-4 h-4 bg-red-500"
-              onError={() => console.log('[Debug] Test image failed to load')}
-              onLoad={() => console.log('[Debug] Test image loaded successfully')}
-            />
-            <span className="text-green-400">← Should be a 1x1 pixel</span>
-          </div>
-          
-          {/* Test with a simple gear icon */}
-          <div className="flex items-center space-x-2">
-            <span>Test gear icon:</span>
-            <img 
-              src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEyIDhDMTQgOCAxNiA5IDEyIDEyQzggMTUgMTAgMTYgMTIgMTZDMTQgMTYgMTYgMTUgMTIgMTJaIiBmaWxsPSIjOTk5OTk5Ii8+Cjwvc3ZnPgo="
-              alt="gear" 
-              className="w-4 h-4"
-              onError={() => console.log('[Debug] Gear icon failed to load')}
-              onLoad={() => console.log('[Debug] Gear icon loaded successfully')}
-            />
-            <span className="text-green-400">← Should be a gear</span>
-          </div>
-        </div>
-        
+      <div className="p-4 space-y-3">
         <div className="relative">
           <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
             <Search className="h-5 w-5 text-blue-400" />
