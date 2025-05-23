@@ -41,11 +41,11 @@ export class AppSearchProvider implements SearchProvider {
     if (!this.isElectron || !electron?.app?.getApplications) return;
 
     try {
-      // console.log('[AppSearchProvider] Requesting initial applications list...');
+      console.log('[AppSearchProvider] Requesting initial applications list...');
       const initialApps = await electron.app.getApplications();
       if (initialApps && Array.isArray(initialApps)) {
         this.appCache = initialApps.map(app => ({ ...app, icon: app.icon || '' }));
-        // console.log(`[AppSearchProvider] Initialized with ${this.appCache.length} apps.`);
+        console.log(`[AppSearchProvider] Initialized with ${this.appCache.length} apps.`);
         if (this.onCacheUpdate) this.onCacheUpdate();
       }
 
@@ -73,9 +73,9 @@ export class AppSearchProvider implements SearchProvider {
 
       // Check if the onUpdatedAppIcons function exists at runtime
       if (typeof electron?.app?.onUpdatedAppIcons === 'function') {
-        // console.log('[AppSearchProvider] Setting up listener for updated app icons.');
+        console.log('[AppSearchProvider] Setting up listener for updated app icons.');
         electron.app.onUpdatedAppIcons((updatedAppsWithIcons: Application[]) => {
-          // console.log(`[AppSearchProvider] Received ${updatedAppsWithIcons.length} updated app icons.`);
+          console.log(`[AppSearchProvider] Received ${updatedAppsWithIcons.length} updated app icons.`);
           let cacheChanged = false;
           
           // Create a map for fast lookup
@@ -84,13 +84,21 @@ export class AppSearchProvider implements SearchProvider {
           this.appCache = this.appCache.map(cachedApp => {
             const updatedApp = updateMap.get(cachedApp.path);
             if (updatedApp && updatedApp.icon && cachedApp.icon !== updatedApp.icon) {
+              console.log(`[AppSearchProvider] Updating icon for ${cachedApp.name}:`, {
+                hasNewIcon: !!updatedApp.icon,
+                iconLength: updatedApp.icon?.length || 0,
+                iconPrefix: updatedApp.icon?.substring(0, 20) + '...'
+              });
               cacheChanged = true;
               return { ...cachedApp, icon: updatedApp.icon };
             }
             return cachedApp;
           });
           
-          if (cacheChanged && this.onCacheUpdate) this.onCacheUpdate();
+          if (cacheChanged) {
+            console.log('[AppSearchProvider] Cache updated with new icons, notifying components');
+            if (this.onCacheUpdate) this.onCacheUpdate();
+          }
         });
       }
     } catch (error) {
@@ -103,12 +111,14 @@ export class AppSearchProvider implements SearchProvider {
     // Ensure appCache is used
     const currentApps = this.appCache;
 
-    // Only show results when there's a search term or when category filter is active
+    // Show popular/common apps when there's no search term, or filter by search term
     const matchedApps = query.trim() === '' 
-      ? [] // Return empty array when no search term
+      ? currentApps.slice(0, 10) // Show first 10 apps when no search term
       : currentApps.filter(app => 
           app.name.toLowerCase().includes(lowercaseQuery)
         );
+    
+    console.log(`[AppSearchProvider] Search for "${query}" returned ${matchedApps.length} results`);
     return matchedApps.map(app => this.appToSearchResult(app));
   }
   
@@ -120,6 +130,14 @@ export class AppSearchProvider implements SearchProvider {
   
   private appToSearchResult(app: Application): SearchResult {
     const electron = window.electron as any;
+    
+    // Debug logging for icon data
+    console.log(`[AppSearchProvider] Converting ${app.name} to SearchResult:`, {
+      hasIcon: !!app.icon,
+      iconLength: app.icon?.length || 0,
+      iconPrefix: app.icon?.substring(0, 30) || 'no icon',
+      path: app.path
+    });
     
     return {
       id: `app:${app.path}`,

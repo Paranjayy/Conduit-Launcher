@@ -197,16 +197,40 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
     const appPath = searchResult.metadata?.path || searchResult.id;
     const iconData = searchResult.metadata?.rawIcon; // Use the raw base64 string
 
+    // Enhanced logging for debugging
+    console.log(`[AppSearch] Rendering icon for ${searchResult.title}:`, {
+      hasIconData: !!iconData,
+      iconDataType: typeof iconData,
+      iconDataLength: iconData?.length || 0,
+      isFailed: failedIcons.has(appPath),
+      appPath
+    });
+
     if (!iconData || typeof iconData !== 'string' || failedIcons.has(appPath)) {
       return <Laptop className="h-6 w-6 text-blue-400" />;
     }
+
+    // Ensure the iconData has the proper data URL format
+    let processedIconData = iconData;
+    if (iconData && !iconData.startsWith('data:')) {
+      // If iconData is just base64 without the prefix, add it
+      processedIconData = `data:image/png;base64,${iconData}`;
+      console.log(`[AppSearch] Added data URL prefix for ${searchResult.title}`);
+    }
+
     return (
       <div className="relative w-6 h-6">
         <img 
-          src={iconData} 
+          src={processedIconData} 
           alt={`${searchResult.title} icon`}
           className="w-full h-full object-contain"
-          onError={() => handleImageError(appPath)}
+          onError={() => {
+            console.error(`[AppSearch] Image failed to load for ${searchResult.title}:`, processedIconData?.substring(0, 50) + '...');
+            handleImageError(appPath);
+          }}
+          onLoad={() => {
+            console.log(`[AppSearch] Image loaded successfully for ${searchResult.title}`);
+          }}
           loading="lazy" // Add lazy loading for better performance with many icons
         />
       </div>

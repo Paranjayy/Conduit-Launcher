@@ -238,19 +238,34 @@ async function processAndSendIcons(appsToProcess, sourceDescription) {
   
   for (let i = 0; i < appsToProcess.length; i += batchSize) {
     const batch = appsToProcess.slice(i, i + batchSize);
-    console.log(`[processAndSendIcons] Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(appsToProcess.length/batchSize)}`);
+    console.log(`[processAndSendIcons] Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(appsToProcess.length/batchSize)}: ${batch.map(app => app.name).join(', ')}`);
 
     const appsWithIcons = await Promise.all(
       batch.map(async (appInfo) => {
+        console.log(`[processAndSendIcons] Getting icon for: ${appInfo.name}`);
         const icon = await getAppIcon(appInfo.path);
-        return { ...appInfo, icon: icon || '' }; // Ensure icon is always a string (base64 or empty)
+        const result = { ...appInfo, icon: icon || '' }; // Ensure icon is always a string (base64 or empty)
+        
+        if (icon) {
+          console.log(`[processAndSendIcons] Successfully got icon for ${appInfo.name}: ${icon.length} characters`);
+        } else {
+          console.warn(`[processAndSendIcons] No icon obtained for ${appInfo.name}`);
+        }
+        
+        return result;
       })
     );
 
     // Send all apps in the batch, even if icon wasn't found
     if (appsWithIcons.length > 0) {
+      const appsWithIconsCount = appsWithIcons.filter(app => app.icon).length;
+      console.log(`[processAndSendIcons] Sending batch of ${appsWithIcons.length} apps (${appsWithIconsCount} with icons)`);
+      
       if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
         mainWindow.webContents.send('updated-app-icons', appsWithIcons);
+        console.log(`[processAndSendIcons] Successfully sent batch to renderer`);
+      } else {
+        console.warn(`[processAndSendIcons] Cannot send batch - window/webContents unavailable`);
       }
     }
     await new Promise(r => setTimeout(r, 200)); // Slightly reduce delay between batches
@@ -364,6 +379,8 @@ ipcMain.handle('get-applications', async () => {
 // Helper function to get macOS app icon
 async function getAppIcon(appPath) {
   try {
+    console.log(`[getAppIcon] Processing: ${appPath}`);
+    
     // 1. Check if the path actually exists before trying to get an icon
     if (!fs.existsSync(appPath)) {
       console.warn(`[getAppIcon] Path does not exist: ${appPath}`);
@@ -379,16 +396,17 @@ async function getAppIcon(appPath) {
     // 2. Find Info.plist inside the .app bundle
     const infoPlistPath = path.join(appPath, 'Contents', 'Info.plist');
     if (!fs.existsSync(infoPlistPath)) {
-      console.warn(`[getAppIcon] Info.plist not found for: ${appPath}`);
+      console.warn(`[getAppIcon] Info.plist not found for: ${appPath}, trying fallback`);
       // Fall back to Electron's getFileIcon if no Info.plist
       try {
         const iconNative = await app.getFileIcon(appPath, { size: 'normal' });
         if (iconNative && !iconNative.isEmpty()) {
-        const iconBase64 = `data:image/png;base64,${iconNative.toPNG().toString('base64')}`;
-        return iconBase64;
+          const iconBase64 = `data:image/png;base64,${iconNative.toPNG().toString('base64')}`;
+          console.log(`[getAppIcon] Fallback icon successful for: ${appPath}`);
+          return iconBase64;
         }
       } catch (err) {
-        // Ignore errors in fallback
+        console.error(`[getAppIcon] Fallback failed for ${appPath}:`, err.message);
       }
       return null;
     }
@@ -400,8 +418,8 @@ async function getAppIcon(appPath) {
       info = plist.parse(plistContent);
     } catch (plistError) {
       console.error(`[getAppIcon] Error parsing Info.plist for ${appPath}: ${plistError.message}`);
-    return null;
-  }
+      return null;
+    }
 
     // 4. Get the icon file name
     let iconFile = info.CFBundleIconFile || '';
@@ -436,7 +454,11 @@ async function getAppIcon(appPath) {
         if (icnsFiles.length > 0) {
           const alternatePath = path.join(resourcesPath, icnsFiles[0]);
           console.log(`[getAppIcon] Found alternative icon: ${alternatePath}`);
-          return await extractIcns(alternatePath);
+          const result = await extractIcns(alternatePath);
+          if (result) {
+            console.log(`[getAppIcon] Alternative icon extraction successful for: ${appPath}`);
+            return result;
+          }
         }
       } catch (dirError) {
         console.error(`[getAppIcon] Error reading Resources dir: ${dirError.message}`);
@@ -447,17 +469,25 @@ async function getAppIcon(appPath) {
         const iconNative = await app.getFileIcon(appPath, { size: 'normal' });
         if (iconNative && !iconNative.isEmpty()) {
           const iconBase64 = `data:image/png;base64,${iconNative.toPNG().toString('base64')}`;
+          console.log(`[getAppIcon] Final fallback successful for: ${appPath}`);
           return iconBase64;
         }
       } catch (err) {
-        // Ignore errors in fallback
+        console.error(`[getAppIcon] Final fallback failed for ${appPath}:`, err.message);
       }
       
       return null;
     }
 
     // 6. Extract PNG from ICNS and convert to base64
-    return await extractIcns(iconPath);
+    console.log(`[getAppIcon] Extracting icon from: ${iconPath}`);
+    const result = await extractIcns(iconPath);
+    if (result) {
+      console.log(`[getAppIcon] Successfully extracted icon for: ${appPath}, length: ${result.length}`);
+    } else {
+      console.warn(`[getAppIcon] Failed to extract icon for: ${appPath}`);
+    }
+    return result;
     
   } catch (error) {
     console.error(`[getAppIcon] General error for ${appPath}: ${error.message}`);
@@ -468,29 +498,47 @@ async function getAppIcon(appPath) {
 // Helper function to extract icons from ICNS files
 async function extractIcns(iconPath) {
   try {
+    console.log(`[extractIcns] Processing: ${iconPath}`);
+    
     // Read the ICNS file
     const iconBuffer = fs.readFileSync(iconPath);
+    console.log(`[extractIcns] Read ${iconBuffer.length} bytes from ${iconPath}`);
     
     // Parse the ICNS file
     const icns = Icns.from(iconBuffer);
     
     // Get the largest image (usually the first one)
     if (!icns.images || icns.images.length === 0) {
+      console.warn(`[extractIcns] No images found in ICNS file: ${iconPath}`);
       return null;
     }
+    
+    console.log(`[extractIcns] Found ${icns.images.length} images in ICNS file`);
     
     // Sort by size and get the largest
     const sortedImages = [...icns.images].sort((a, b) => 
       (b.width * b.height) - (a.width * a.height)
     );
     
+    const largestImage = sortedImages[0];
+    console.log(`[extractIcns] Using image with dimensions ${largestImage.width}x${largestImage.height}`);
+    
     // Get the PNG data from the largest image
-    const pngBuffer = sortedImages[0].data;
+    const pngBuffer = largestImage.data;
+    
+    if (!pngBuffer || pngBuffer.length === 0) {
+      console.warn(`[extractIcns] Empty PNG buffer for ${iconPath}`);
+      return null;
+    }
     
     // Convert to base64 data URL
     const base64 = pngBuffer.toString('base64');
-    return `data:image/png;base64,${base64}`;
-    } catch (error) {
+    const dataUrl = `data:image/png;base64,${base64}`;
+    
+    console.log(`[extractIcns] Successfully extracted icon: ${dataUrl.length} characters`);
+    return dataUrl;
+    
+  } catch (error) {
     console.error(`[extractIcns] Error extracting icon from ${iconPath}: ${error.message}`);
     return null;
   }
