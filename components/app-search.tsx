@@ -1,10 +1,18 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Search, Laptop, ArrowRight, Filter, ChevronDown } from 'lucide-react';
-import { AppSearchProvider } from '@/lib/providers/app-provider';
-import type { SearchResult } from '@/lib/search-providers';
+"use client";
+
+import React, { useState, useEffect, useRef, useMemo } from "react";
+import { Search, Laptop, ArrowRight, Filter, ChevronDown } from "lucide-react";
+import { AppSearchProvider } from "@/lib/providers/app-provider";
+import type { SearchResult } from "@/lib/search-providers";
 
 // Define filter categories
-type FilterCategory = 'all' | 'system' | 'user' | 'utilities' | 'creativity' | 'productivity';
+type FilterCategory =
+  | "all"
+  | "system"
+  | "user"
+  | "utilities"
+  | "creativity"
+  | "productivity";
 
 interface AppSearchProps {
   onViewChange: (view: ViewType) => void;
@@ -26,13 +34,13 @@ type ViewType =
   | "aiChat";
 
 export function AppSearch({ onViewChange }: AppSearchProps) {
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const [filteredApps, setFilteredApps] = useState<SearchResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [failedIcons, setFailedIcons] = useState<Set<string>>(new Set());
-  const [filterCategory, setFilterCategory] = useState<FilterCategory>('all');
+  const [filterCategory, setFilterCategory] = useState<FilterCategory>("all");
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -51,14 +59,17 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
   // Handle clicks outside the dropdown to close it
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
         setShowFilterDropdown(false);
       }
     }
-    
-    document.addEventListener('mousedown', handleClickOutside);
+
+    document.addEventListener("mousedown", handleClickOutside);
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener("mousedown", handleClickOutside);
     };
   }, []);
 
@@ -69,8 +80,8 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
     // Listen to provider updates
     const unsubscribe = appSearchProvider.subscribe(() => {
       // Trigger a search to refresh the list when cache updates
-      console.log('App cache updated, icon data may have been received.');
-      setSearchTerm(prevTerm => prevTerm); // Re-trigger search with current term
+      console.log("App cache updated, icon data may have been received.");
+      setSearchTerm((prevTerm) => prevTerm); // Re-trigger search with current term
     });
     return unsubscribe;
   }, [appSearchProvider]);
@@ -81,17 +92,17 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
       setLoadError(null);
       try {
         const results = await appSearchProvider.search(searchTerm);
-        
+
         // Apply category filtering
         let filteredResults = results;
-        if (filterCategory !== 'all') {
+        if (filterCategory !== "all") {
           filteredResults = filterAppsByCategory(results, filterCategory);
         }
-        
+
         setFilteredApps(filteredResults);
       } catch (error) {
         console.error("Error searching apps:", error);
-        setLoadError('Failed to search applications.');
+        setLoadError("Failed to search applications.");
         setFilteredApps([]);
       } finally {
         setIsLoading(false);
@@ -108,44 +119,76 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
       const item = selectedItemRef.current;
       const containerRect = container.getBoundingClientRect();
       const itemRect = item.getBoundingClientRect();
-      
+
       if (itemRect.bottom > containerRect.bottom) {
-        container.scrollTop += (itemRect.bottom - containerRect.bottom) + 8;
+        container.scrollTop += itemRect.bottom - containerRect.bottom + 8;
       } else if (itemRect.top < containerRect.top) {
-        container.scrollTop -= (containerRect.top - itemRect.top) + 8;
+        container.scrollTop -= containerRect.top - itemRect.top + 8;
       }
     }
   }, [selectedIndex]);
 
   // Filter apps based on selected category
-  const filterAppsByCategory = (apps: SearchResult[], category: FilterCategory): SearchResult[] => {
+  const filterAppsByCategory = (
+    apps: SearchResult[],
+    category: FilterCategory,
+  ): SearchResult[] => {
     switch (category) {
-      case 'system':
-        return apps.filter(app => app.description?.includes('/System/Applications'));
-      case 'user':
-        return apps.filter(app => app.description?.includes('/Users/'));
-      case 'utilities':
+      case "system":
+        return apps.filter((app) =>
+          app.description?.includes("/System/Applications"),
+        );
+      case "user":
+        return apps.filter((app) => app.description?.includes("/Users/"));
+      case "utilities": {
         // Simplified logic - in a real app, you might have more sophisticated category detection
-        const utilityKeywords = ['calculator', 'terminal', 'console', 'system', 'preferences', 'utility'];
-        return apps.filter(app => 
-          utilityKeywords.some(keyword => 
-            app.title.toLowerCase().includes(keyword)
-          )
+        const utilityKeywords = [
+          "calculator",
+          "terminal",
+          "console",
+          "system",
+          "preferences",
+          "utility",
+        ];
+        return apps.filter((app) =>
+          utilityKeywords.some((keyword) =>
+            app.title.toLowerCase().includes(keyword),
+          ),
         );
-      case 'creativity':
-        const creativeKeywords = ['photo', 'image', 'video', 'audio', 'music', 'draw', 'paint', 'edit'];
-        return apps.filter(app => 
-          creativeKeywords.some(keyword => 
-            app.title.toLowerCase().includes(keyword)
-          )
+      }
+      case "creativity": {
+        const creativeKeywords = [
+          "photo",
+          "image",
+          "video",
+          "audio",
+          "music",
+          "draw",
+          "paint",
+          "edit",
+        ];
+        return apps.filter((app) =>
+          creativeKeywords.some((keyword) =>
+            app.title.toLowerCase().includes(keyword),
+          ),
         );
-      case 'productivity':
-        const productivityKeywords = ['office', 'document', 'spreadsheet', 'presentation', 'notes', 'mail', 'calendar'];
-        return apps.filter(app => 
-          productivityKeywords.some(keyword => 
-            app.title.toLowerCase().includes(keyword)
-          )
+      }
+      case "productivity": {
+        const productivityKeywords = [
+          "office",
+          "document",
+          "spreadsheet",
+          "presentation",
+          "notes",
+          "mail",
+          "calendar",
+        ];
+        return apps.filter((app) =>
+          productivityKeywords.some((keyword) =>
+            app.title.toLowerCase().includes(keyword),
+          ),
         );
+      }
       default:
         return apps;
     }
@@ -153,48 +196,56 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Close dropdown on Escape if it's open
-    if (e.key === 'Escape' && showFilterDropdown) {
+    if (e.key === "Escape" && showFilterDropdown) {
       setShowFilterDropdown(false);
       return;
     }
-    
+
     switch (e.key) {
-      case 'ArrowDown':
+      case "ArrowDown":
         e.preventDefault();
         if (filteredApps.length > 0) {
-          setSelectedIndex(prev => 
-            prev < filteredApps.length - 1 ? prev + 1 : prev
+          setSelectedIndex((prev) =>
+            prev < filteredApps.length - 1 ? prev + 1 : prev,
           );
         }
         break;
-      case 'ArrowUp':
+      case "ArrowUp":
         e.preventDefault();
-        setSelectedIndex(prev => (prev > 0 ? prev - 1 : prev));
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
         break;
-      case 'Enter':
-        if (filteredApps.length > 0 && selectedIndex >= 0 && selectedIndex < filteredApps.length) {
+      case "Enter":
+        if (
+          filteredApps.length > 0 &&
+          selectedIndex >= 0 &&
+          selectedIndex < filteredApps.length
+        ) {
           launchApplication(filteredApps[selectedIndex]);
         }
         break;
-      case 'Escape':
-        if (searchTerm) setSearchTerm('');
-        else onViewChange('command');
+      case "Escape":
+        if (searchTerm) setSearchTerm("");
+        else onViewChange("command");
         break;
-      case 'Home':
+      case "Home":
         e.preventDefault();
         if (filteredApps.length > 0) setSelectedIndex(0);
         break;
-      case 'End':
+      case "End":
         e.preventDefault();
         if (filteredApps.length > 0) setSelectedIndex(filteredApps.length - 1);
         break;
-      case 'PageUp':
+      case "PageUp":
         e.preventDefault();
-        if (filteredApps.length > 0) setSelectedIndex(prev => Math.max(0, prev - 5));
+        if (filteredApps.length > 0)
+          setSelectedIndex((prev) => Math.max(0, prev - 5));
         break;
-      case 'PageDown':
+      case "PageDown":
         e.preventDefault();
-        if (filteredApps.length > 0) setSelectedIndex(prev => Math.min(filteredApps.length - 1, prev + 5));
+        if (filteredApps.length > 0)
+          setSelectedIndex((prev) =>
+            Math.min(filteredApps.length - 1, prev + 5),
+          );
         break;
     }
   };
@@ -204,18 +255,18 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
       appResult.action(); // This should call the action defined in AppSearchProvider
       // onViewChange('command'); // Or hide window if preferred
     } else {
-      console.error('No action defined for app:', appResult.title);
+      console.error("No action defined for app:", appResult.title);
     }
   };
 
   const handleImageError = (appPath: string) => {
     // console.log(`[AppSearch] Failed to load icon for: ${appPath}, using fallback.`);
-    setFailedIcons(prev => new Set(prev).add(appPath));
+    setFailedIcons((prev) => new Set(prev).add(appPath));
   };
 
   const renderAppIcon = (searchResult: SearchResult) => {
     const appPath = searchResult.metadata?.path || searchResult.id;
-    const iconData = searchResult.metadata?.rawIcon; // Use the raw base64 string
+    const iconData = searchResult.metadata?.rawIcon || searchResult.icon; // Try both rawIcon and icon
 
     // Enhanced logging for debugging
     console.log(`[AppSearch] Rendering icon for ${searchResult.title}:`, {
@@ -227,20 +278,28 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
       iconDataPrefix: iconData?.substring(0, 50) || 'no data'
     });
 
-    if (!iconData || typeof iconData !== 'string' || failedIcons.has(appPath)) {
-      console.log(`[AppSearch] Using fallback icon for ${searchResult.title}`);
+    // Check if icon failed before
+    if (failedIcons.has(appPath)) {
+      console.log(`[AppSearch] Using fallback icon for ${searchResult.title} (previously failed)`);
+      return <Laptop className="h-6 w-6 text-blue-400" />;
+    }
+
+    // Check if we have valid icon data
+    if (!iconData || typeof iconData !== 'string') {
+      console.log(`[AppSearch] No valid icon data for ${searchResult.title}`);
       return <Laptop className="h-6 w-6 text-blue-400" />;
     }
 
     // Ensure the iconData has the proper data URL format
     let processedIconData = iconData;
-    if (iconData && !iconData.startsWith('data:')) {
-      // If iconData is just base64 without the prefix, add it
+    
+    // If iconData doesn't start with data:, add the prefix
+    if (!iconData.startsWith('data:')) {
       processedIconData = `data:image/png;base64,${iconData}`;
       console.log(`[AppSearch] Added data URL prefix for ${searchResult.title}`);
     }
 
-    // Test if this is a valid data URL
+    // Validate data URL format
     try {
       new URL(processedIconData);
     } catch (e) {
@@ -252,10 +311,10 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
 
     return (
       <div className="relative w-6 h-6">
-        <img 
-          src={processedIconData} 
+        <img
+          src={processedIconData}
           alt={`${searchResult.title} icon`}
-          className="w-full h-full object-contain"
+          className="w-full h-full object-contain rounded-sm"
           onError={(e) => {
             console.error(`[AppSearch] Image failed to load for ${searchResult.title}:`, {
               src: processedIconData?.substring(0, 50) + '...',
@@ -266,12 +325,12 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
             handleImageError(appPath);
           }}
           onLoad={(e) => {
-            console.log(`[AppSearch] Image loaded successfully for ${searchResult.title}:`, {
+            console.log(`[AppSearch] ✅ Image loaded successfully for ${searchResult.title}:`, {
               naturalWidth: (e.target as HTMLImageElement).naturalWidth,
               naturalHeight: (e.target as HTMLImageElement).naturalHeight
             });
           }}
-          loading="lazy" // Add lazy loading for better performance with many icons
+          loading="lazy"
         />
       </div>
     );
@@ -279,13 +338,20 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
 
   const getCategoryDisplayName = (category: FilterCategory): string => {
     switch (category) {
-      case 'all': return 'All Applications';
-      case 'system': return 'System Apps';
-      case 'user': return 'User Apps';
-      case 'utilities': return 'Utilities';
-      case 'creativity': return 'Creativity';
-      case 'productivity': return 'Productivity';
-      default: return 'Unknown';
+      case "all":
+        return "All Applications";
+      case "system":
+        return "System Apps";
+      case "user":
+        return "User Apps";
+      case "utilities":
+        return "Utilities";
+      case "creativity":
+        return "Creativity";
+      case "productivity":
+        return "Productivity";
+      default:
+        return "Unknown";
     }
   };
 
@@ -362,12 +428,12 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
             autoFocus
           />
         </div>
-        
+
         {/* Filter dropdown */}
         <div className="relative" ref={dropdownRef}>
           <button
             className="flex items-center justify-between w-full px-3 py-2 text-sm font-medium text-left bg-gray-800 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            onClick={() => setShowFilterDropdown(prev => !prev)}
+            onClick={() => setShowFilterDropdown((prev) => !prev)}
             type="button"
           >
             <div className="flex items-center space-x-2">
@@ -376,14 +442,25 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
             </div>
             <ChevronDown className="h-4 w-4 text-gray-400" />
           </button>
-          
+
           {showFilterDropdown && (
             <div className="absolute z-10 mt-1 w-full bg-gray-800 rounded-md shadow-lg py-1 text-sm ring-1 ring-black ring-opacity-5 focus:outline-none">
-              {(['all', 'system', 'user', 'utilities', 'creativity', 'productivity'] as FilterCategory[]).map((category) => (
+              {(
+                [
+                  "all",
+                  "system",
+                  "user",
+                  "utilities",
+                  "creativity",
+                  "productivity",
+                ] as FilterCategory[]
+              ).map((category) => (
                 <button
                   key={category}
                   className={`block px-4 py-2 text-left w-full hover:bg-gray-700 ${
-                    category === filterCategory ? 'bg-blue-700 text-white' : 'text-gray-300'
+                    category === filterCategory
+                      ? "bg-blue-700 text-white"
+                      : "text-gray-300"
                   }`}
                   onClick={() => {
                     setFilterCategory(category);
@@ -410,20 +487,29 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
               <Search className="h-10 w-10 mx-auto mb-2" />
               <p>{loadError}</p>
             </div>
-            <p className="text-sm text-gray-500">Try restarting the application</p>
+            <p className="text-sm text-gray-500">
+              Try restarting the application
+            </p>
           </div>
         ) : filteredApps.length > 0 ? (
           <div className="flex-1 overflow-hidden">
             <div className="text-xs text-gray-500 px-3 py-1">
-              Showing {filteredApps.length} applications
+              {searchTerm
+                ? `Found ${filteredApps.length} applications`
+                : `Showing ${filteredApps.length} applications`}
             </div>
-            <ul ref={listRef} className="flex-1 overflow-y-auto px-2 space-y-1 custom-scrollbar max-h-[calc(100vh-15rem)]">
+            <ul
+              ref={listRef}
+              className="flex-1 overflow-y-auto px-2 space-y-1 custom-scrollbar max-h-[calc(100vh-15rem)]"
+            >
               {filteredApps.map((app, index) => (
-                <li 
+                <li
                   key={app.id}
                   ref={index === selectedIndex ? selectedItemRef : null}
                   className={`flex items-center p-3 rounded-lg cursor-pointer transition-colors duration-100 ${
-                    index === selectedIndex ? 'bg-blue-700 text-white shadow-lg' : 'hover:bg-gray-800 text-gray-300'
+                    index === selectedIndex
+                      ? "bg-blue-700 text-white shadow-lg"
+                      : "hover:bg-gray-800 text-gray-300"
                   }`}
                   onClick={() => launchApplication(app)}
                   onMouseEnter={() => setSelectedIndex(index)}
@@ -431,14 +517,18 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
                   aria-selected={index === selectedIndex}
                   tabIndex={-1} // Keep focus on input
                 >
-                  <div className="flex-shrink-0 w-8 h-8 mr-3 flex items-center justify-center bg-gray-800/50 rounded-md p-1">
+                  <div className="flex-shrink-0 w-8 h-8 mr-3 flex items-center justify-center bg-gray-800/30 rounded-md p-1">
                     {renderAppIcon(app)}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{app.title}</p>
-                    <p className="text-xs text-gray-500 truncate">{app.description}</p>
+                    <p className="text-xs text-gray-500 truncate">
+                      {app.description}
+                    </p>
                   </div>
-                  {index === selectedIndex && <ArrowRight className="h-4 w-4 text-blue-300 ml-2 flex-shrink-0" />}
+                  {index === selectedIndex && (
+                    <ArrowRight className="h-4 w-4 text-blue-300 ml-2 flex-shrink-0" />
+                  )}
                 </li>
               ))}
             </ul>
@@ -449,8 +539,12 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
               <Search className="h-10 w-10 mx-auto mb-2" />
               <p>No applications found</p>
             </div>
-            {searchTerm && <p className="text-sm text-gray-600">Try a different search term</p>}
-            {!searchTerm && filterCategory !== 'all' && (
+            {searchTerm && (
+              <p className="text-sm text-gray-600">
+                Try a different search term
+              </p>
+            )}
+            {!searchTerm && filterCategory !== "all" && (
               <p className="text-sm text-gray-600">Try a different category</p>
             )}
           </div>
@@ -463,4 +557,4 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
       </div>
     </div>
   );
-} 
+}
