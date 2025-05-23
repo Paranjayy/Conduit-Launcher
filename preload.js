@@ -86,5 +86,21 @@ contextBridge.exposeInMainWorld('electron', {
   menu: {
     getItems: () => ipcRenderer.invoke('get-menu-items'),
     executeItem: (menuPath) => ipcRenderer.invoke('execute-menu-item', menuPath)
+  },
+
+  // File system operations
+  files: {
+    getHomeDirectory: () => ipcRenderer.invoke('get-home-directory'),
+    readDirectory: (path) => ipcRenderer.invoke('read-directory', path),
+    searchFiles: (query, basePath) => ipcRenderer.invoke('search-files', query, basePath),
+    openFile: (filePath) => ipcRenderer.invoke('open-file', filePath)
+  },
+
+  // Window management operations (macOS only)
+  windowManager: {
+    getWindows: () => ipcRenderer.invoke('get-windows'),
+    resizeWindow: (action) => ipcRenderer.invoke('resize-window', action),
+    minimizeWindow: (windowTitle) => ipcRenderer.invoke('minimize-window-by-id', windowTitle),
+    focusWindow: (windowTitle) => ipcRenderer.invoke('focus-window-by-title', windowTitle)
   }
 }); 

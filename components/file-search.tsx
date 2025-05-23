@@ -10,376 +10,394 @@ import {
   ChevronDown,
   ExternalLink,
   Copy,
+  ArrowRight,
+  Home,
+  FolderOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
+type ViewType = 
+  | "command" 
+  | "clipboard" 
+  | "pasteStack" 
+  | "snippets" 
+  | "appSearch" 
+  | "preferences" 
+  | "contextualShortcuts" 
+  | "calculator" 
+  | "menuSearch" 
+  | "notes" 
+  | "multiClipboard"
+  | "emojiSearch"
+  | "aiChat"
+  | "fileSearch";
+
 interface FileSearchProps {
-  onViewChange: (view: string) => void;
+  onViewChange: (view: ViewType) => void;
 }
 
 interface FileResult {
-  id: string;
   name: string;
   path: string;
-  type: "file" | "folder";
+  type: 'file' | 'folder';
   size?: number;
   modified?: Date;
-  extension?: string;
 }
-
-// Mock file search results for demonstration
-const MOCK_FILES: FileResult[] = [
-  {
-    id: "1",
-    name: "Documents",
-    path: "/Users/username/Documents",
-    type: "folder",
-    modified: new Date("2024-01-15"),
-  },
-  {
-    id: "2",
-    name: "project.tsx",
-    path: "/Users/username/Projects/omnilaunch/project.tsx",
-    type: "file",
-    size: 2048,
-    modified: new Date("2024-01-20"),
-    extension: "tsx",
-  },
-  {
-    id: "3",
-    name: "README.md",
-    path: "/Users/username/Projects/omnilaunch/README.md",
-    type: "file",
-    size: 1024,
-    modified: new Date("2024-01-18"),
-    extension: "md",
-  },
-  {
-    id: "4",
-    name: "package.json",
-    path: "/Users/username/Projects/omnilaunch/package.json",
-    type: "file",
-    size: 512,
-    modified: new Date("2024-01-19"),
-    extension: "json",
-  },
-];
 
 export function FileSearch({ onViewChange }: FileSearchProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [filteredFiles, setFilteredFiles] = useState<FileResult[]>(MOCK_FILES);
+  const [currentPath, setCurrentPath] = useState("");
+  const [results, setResults] = useState<FileResult[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [searchMode, setSearchMode] = useState<'browse' | 'search'>('browse');
+  const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [filterType, setFilterType] = useState<"all" | "files" | "folders">(
     "all",
   );
-  const [showFilterDropdown, setShowFilterDropdown] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewItem, setPreviewItem] = useState<FileResult | null>(null);
+  const [showAppSelector, setShowAppSelector] = useState(false);
+  
   const searchInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // Filter files based on search query and type filter
-  useEffect(() => {
-    let results = MOCK_FILES;
-
-    // Apply search filter
-    if (searchQuery.trim()) {
-      results = results.filter(
-        (file) =>
-          file.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          file.path.toLowerCase().includes(searchQuery.toLowerCase()),
-      );
-    }
-
-    // Apply type filter
-    if (filterType !== "all") {
-      results = results.filter((file) =>
-        filterType === "files" ? file.type === "file" : file.type === "folder",
-      );
-    }
-
-    setFilteredFiles(results);
-    setSelectedIndex(0);
-  }, [searchQuery, filterType]);
+  const listRef = useRef<HTMLUListElement>(null);
+  const selectedItemRef = useRef<HTMLLIElement>(null);
 
   // Focus search input on mount
   useEffect(() => {
     searchInputRef.current?.focus();
+    loadHomeDirectory();
   }, []);
 
-  // Handle clicks outside dropdown
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target as Node)
-      ) {
-        setShowFilterDropdown(false);
+  // Load home directory on startup
+  const loadHomeDirectory = async () => {
+    if (typeof window !== "undefined" && window.electron?.files) {
+      try {
+        const homeDir = await window.electron.files.getHomeDirectory();
+        setCurrentPath(homeDir);
+        loadDirectory(homeDir);
+      } catch (error) {
+        console.error("Failed to load home directory:", error);
+        setCurrentPath("/");
+        loadDirectory("/");
       }
     }
+  };
 
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  // Load directory contents
+  const loadDirectory = async (path: string) => {
+    setIsLoading(true);
+    try {
+      if (typeof window !== "undefined" && window.electron?.files) {
+        const files = await window.electron.files.readDirectory(path);
+        setResults(files.map(file => ({
+          name: file.name,
+          path: file.path,
+          type: file.isDirectory ? 'folder' : 'file',
+          size: file.size,
+          modified: file.modified ? new Date(file.modified) : undefined
+        })));
+        setSelectedIndex(0);
+      }
+    } catch (error) {
+      console.error("Failed to load directory:", error);
+      setResults([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-  // Handle keyboard navigation
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape" && showFilterDropdown) {
-      setShowFilterDropdown(false);
+  // Search files and folders
+  const searchFiles = async (query: string) => {
+    if (!query.trim()) {
+      setSearchMode('browse');
+      loadDirectory(currentPath);
       return;
     }
 
+    setSearchMode('search');
+    setIsLoading(true);
+    try {
+      if (typeof window !== "undefined" && window.electron?.files) {
+        const searchResults = await window.electron.files.searchFiles(query, currentPath);
+        setResults(searchResults.map(file => ({
+          name: file.name,
+          path: file.path,
+          type: file.isDirectory ? 'folder' : 'file',
+          size: file.size,
+          modified: file.modified ? new Date(file.modified) : undefined
+        })));
+        setSelectedIndex(0);
+      }
+    } catch (error) {
+      console.error("Failed to search files:", error);
+      setResults([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle search input change
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      searchFiles(searchQuery);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery, currentPath]);
+
+  // Handle keyboard navigation
+  const handleKeyDown = (e: React.KeyboardEvent) => {
     switch (e.key) {
       case "ArrowDown":
         e.preventDefault();
-        if (filteredFiles.length > 0) {
-          setSelectedIndex((prev) =>
-            prev < filteredFiles.length - 1 ? prev + 1 : prev,
-          );
+        if (results.length > 0) {
+          setSelectedIndex((prev) => prev < results.length - 1 ? prev + 1 : prev);
         }
         break;
       case "ArrowUp":
         e.preventDefault();
-        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        setSelectedIndex((prev) => prev > 0 ? prev - 1 : prev);
         break;
       case "Enter":
-        if (filteredFiles.length > 0 && selectedIndex >= 0) {
-          handleFileAction(filteredFiles[selectedIndex]);
+        if (results.length > 0 && selectedIndex >= 0 && selectedIndex < results.length) {
+          handleItemAction(results[selectedIndex]);
+        }
+        break;
+      case " ": // Space bar for preview
+        e.preventDefault();
+        if (results.length > 0 && selectedIndex >= 0 && selectedIndex < results.length) {
+          const item = results[selectedIndex];
+          if (item.type === 'file') {
+            setPreviewItem(item);
+            setShowPreview(true);
+          }
+        }
+        break;
+      case "k":
+        if (e.metaKey && results.length > 0 && selectedIndex >= 0 && selectedIndex < results.length) {
+          e.preventDefault();
+          const item = results[selectedIndex];
+          if (item.type === 'file') {
+            setPreviewItem(item);
+            setShowAppSelector(true);
+          }
         }
         break;
       case "Escape":
-        if (searchQuery) {
+        if (showPreview) {
+          setShowPreview(false);
+          setPreviewItem(null);
+        } else if (showAppSelector) {
+          setShowAppSelector(false);
+          setPreviewItem(null);
+        } else if (searchQuery) {
           setSearchQuery("");
         } else {
           onViewChange("command");
         }
         break;
+      case "Backspace":
+        if (e.metaKey && !searchQuery) {
+          navigateUp();
+        }
+        break;
     }
   };
 
-  // Handle file/folder actions
-  const handleFileAction = (file: FileResult) => {
-    if (file.type === "folder") {
-      // Open folder in file manager
-      console.log("Opening folder:", file.path);
+  // Handle item action (open file/folder)
+  const handleItemAction = async (item: FileResult) => {
+    if (item.type === 'folder') {
+      setCurrentPath(item.path);
+      setSearchQuery("");
+      loadDirectory(item.path);
     } else {
-      // Open file with default application
-      console.log("Opening file:", file.path);
+      // Open file
+      try {
+        if (typeof window !== "undefined" && window.electron?.files) {
+          await window.electron.files.openFile(item.path);
+        }
+      } catch (error) {
+        console.error("Failed to open file:", error);
+      }
     }
   };
 
-  // Copy file path to clipboard
-  const copyPath = (file: FileResult) => {
-    navigator.clipboard.writeText(file.path).catch((error) => {
-      console.error('Failed to copy path to clipboard:', error);
-    });
+  // Navigate up one directory
+  const navigateUp = () => {
+    if (currentPath === "/" || !currentPath) return;
+    
+    const parentPath = currentPath.split('/').slice(0, -1).join('/') || '/';
+    setCurrentPath(parentPath);
+    loadDirectory(parentPath);
   };
+
+  // Navigate to home directory
+  const navigateHome = () => {
+    loadHomeDirectory();
+  };
+
+  // Scroll selected item into view
+  useEffect(() => {
+    if (selectedItemRef.current && listRef.current) {
+      const container = listRef.current;
+      const item = selectedItemRef.current;
+      const containerRect = container.getBoundingClientRect();
+      const itemRect = item.getBoundingClientRect();
+      
+      if (itemRect.bottom > containerRect.bottom) {
+        container.scrollTop += itemRect.bottom - containerRect.bottom + 8;
+      } else if (itemRect.top < containerRect.top) {
+        container.scrollTop -= containerRect.top - itemRect.top + 8;
+      }
+    }
+  }, [selectedIndex]);
 
   // Format file size
   const formatFileSize = (bytes?: number) => {
     if (!bytes) return "";
-    const sizes = ["B", "KB", "MB", "GB"];
+    const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
   };
 
-  // Get file icon based on extension with better icons
-  const getFileIcon = (file: FileResult) => {
-    if (file.type === "folder") {
-      return <Folder className="h-5 w-5 text-blue-400" />;
-    }
-    
-    const ext = file.extension?.toLowerCase();
-    switch (ext) {
-      case 'tsx':
-      case 'ts':
-      case 'js':
-      case 'jsx':
-        return <File className="h-5 w-5 text-yellow-400" />;
-      case 'md':
-        return <File className="h-5 w-5 text-blue-300" />;
-      case 'json':
-        return <File className="h-5 w-5 text-green-400" />;
-      case 'css':
-      case 'scss':
-        return <File className="h-5 w-5 text-purple-400" />;
-      case 'png':
-      case 'jpg':
-      case 'jpeg':
-      case 'gif':
-      case 'svg':
-        return <File className="h-5 w-5 text-pink-400" />;
-      default:
-        return <File className="h-5 w-5 text-gray-400" />;
-    }
+  // Format file date
+  const formatDate = (date?: Date) => {
+    if (!date) return "";
+    return date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   return (
-    <div className="flex flex-col h-full bg-background">
+    <div className="flex flex-col h-full bg-gray-950 text-gray-100">
       {/* Header */}
-      <div className="flex items-center border-b p-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => onViewChange("command")}
-          className="mr-2"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-
-        <h3 className="font-medium mr-4">File & Folder Search</h3>
-
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
+      <div className="p-4 space-y-3">
+        {/* Search Input */}
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+            <Search className="h-5 w-5 text-blue-400" />
+          </div>
+          <input
             ref={searchInputRef}
+            type="text"
+            className="block w-full pl-10 pr-3 py-2.5 border border-gray-700 rounded-lg bg-gray-900 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
             placeholder="Search files and folders..."
-            className="pl-10"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={handleKeyDown}
+            autoFocus
           />
         </div>
 
-        {/* Filter Dropdown */}
-        <div className="relative ml-4" ref={dropdownRef}>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowFilterDropdown(!showFilterDropdown)}
-            className="flex items-center gap-2"
+        {/* Navigation Bar */}
+        <div className="flex items-center space-x-2 text-sm">
+          <button
+            onClick={navigateHome}
+            className="flex items-center space-x-1 px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 transition-colors"
           >
-            <Filter className="h-4 w-4" />
-            {filterType === "all"
-              ? "All"
-              : filterType === "files"
-                ? "Files"
-                : "Folders"}
-            <ChevronDown className="h-4 w-4" />
-          </Button>
-
-          {showFilterDropdown && (
-            <div className="absolute right-0 mt-1 w-32 bg-popover border rounded-md shadow-lg z-10">
-              <div className="py-1">
-                {["all", "files", "folders"].map((type) => (
-                  <button
-                    key={type}
-                    className={cn(
-                      "block w-full px-3 py-2 text-left text-sm hover:bg-accent",
-                      filterType === type && "bg-accent",
-                    )}
-                    onClick={() => {
-                      setFilterType(type as typeof filterType);
-                      setShowFilterDropdown(false);
-                    }}
-                  >
-                    {type === "all"
-                      ? "All"
-                      : type === "files"
-                        ? "Files"
-                        : "Folders"}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <Home className="h-4 w-4" />
+            <span>Home</span>
+          </button>
+          
+          {currentPath !== "/" && (
+            <button
+              onClick={navigateUp}
+              className="flex items-center space-x-1 px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 transition-colors"
+            >
+              <ArrowRight className="h-4 w-4 rotate-180" />
+              <span>Up</span>
+            </button>
           )}
+          
+          <div className="flex-1 px-2 py-1 bg-gray-900 rounded text-gray-400 truncate">
+            {currentPath || "/"}
+          </div>
         </div>
       </div>
 
       {/* Results */}
-      <div className="flex-1 overflow-y-auto">
-        {filteredFiles.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center px-4">
-            <Search className="h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-lg font-medium mb-2">No files found</p>
-            <p className="text-muted-foreground">
-              {searchQuery
-                ? "Try a different search term"
-                : "Start typing to search files and folders"}
-            </p>
+      <div className="flex-1 overflow-hidden flex flex-col">
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
           </div>
-        ) : (
-          <div className="p-2">
-            <div className="text-xs text-muted-foreground px-2 py-1 mb-2">
-              {filteredFiles.length} result
-              {filteredFiles.length !== 1 ? "s" : ""}
+        ) : results.length > 0 ? (
+          <div className="flex-1 overflow-hidden">
+            <div className="text-xs text-gray-500 px-3 py-1">
+              {searchMode === 'search' 
+                ? `Found ${results.length} items`
+                : `${results.length} items in folder`
+              }
             </div>
-
-            <div className="space-y-1">
-              {filteredFiles.map((file, index) => (
-                <div
-                  key={file.id}
+            <ul
+              ref={listRef}
+              className="flex-1 overflow-y-auto px-2 space-y-1 custom-scrollbar max-h-[calc(100vh-15rem)]"
+            >
+              {results.map((item, index) => (
+                <li
+                  key={item.path}
+                  ref={index === selectedIndex ? selectedItemRef : null}
                   className={cn(
-                    "flex items-center p-3 rounded-lg cursor-pointer group",
+                    "flex items-center p-3 rounded-lg cursor-pointer transition-colors duration-100",
                     index === selectedIndex
-                      ? "bg-primary/10 border border-primary/20"
-                      : "hover:bg-accent/50",
+                      ? "bg-blue-700 text-white shadow-lg"
+                      : "hover:bg-gray-800 text-gray-300"
                   )}
-                  onClick={() => handleFileAction(file)}
+                  onClick={() => handleItemAction(item)}
                   onMouseEnter={() => setSelectedIndex(index)}
                 >
-                  <div className="flex-shrink-0 mr-3">{getFileIcon(file)}</div>
-
+                  <div className="flex-shrink-0 w-8 h-8 mr-3 flex items-center justify-center">
+                    {item.type === 'folder' ? (
+                      <Folder className="h-6 w-6 text-blue-400" />
+                    ) : (
+                      <File className="h-6 w-6 text-gray-400" />
+                    )}
+                  </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium truncate">{file.name}</p>
-                      {file.extension && (
-                        <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
-                          {file.extension.toUpperCase()}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground truncate">
-                      {file.path}
-                    </p>
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
-                      {file.size && <span>{formatFileSize(file.size)}</span>}
-                      {file.modified && (
-                        <span>
-                          Modified {file.modified.toLocaleDateString()}
-                        </span>
-                      )}
+                    <p className="text-sm font-medium truncate">{item.name}</p>
+                    <div className="flex items-center space-x-4 text-xs text-gray-500">
+                      <span className="truncate">{item.path}</span>
+                      {item.size && <span>{formatFileSize(item.size)}</span>}
+                      {item.modified && <span>{formatDate(item.modified)}</span>}
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        copyPath(file);
-                      }}
-                      title="Copy path"
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleFileAction(file);
-                      }}
-                      title="Open"
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
+                  {index === selectedIndex && (
+                    <ArrowRight className="h-4 w-4 text-blue-300 ml-2 flex-shrink-0" />
+                  )}
+                </li>
               ))}
+            </ul>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-center px-4 py-8">
+            <div className="text-gray-500 mb-2">
+              {searchMode === 'search' ? (
+                <>
+                  <Search className="h-10 w-10 mx-auto mb-2" />
+                  <p>No files found</p>
+                </>
+              ) : (
+                <>
+                  <FolderOpen className="h-10 w-10 mx-auto mb-2" />
+                  <p>Empty folder</p>
+                </>
+              )}
             </div>
+            {searchQuery && (
+              <p className="text-sm text-gray-600">
+                Try a different search term
+              </p>
+            )}
           </div>
         )}
       </div>
 
       {/* Footer */}
-      <div className="p-3 border-t bg-muted/10 text-xs text-muted-foreground flex justify-between">
-        <span>↑↓ Navigate • ↵ Open • Esc Back</span>
-        <span>{filteredFiles.length} results</span>
+      <div className="p-3 border-t border-gray-800 bg-gray-900 text-xs text-gray-500 flex justify-between">
+        <span>{results.length} items</span>
+        <span>↑↓ Navigate | ↵ Open | ⌫ Up | Esc Back</span>
       </div>
     </div>
   );

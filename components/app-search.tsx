@@ -42,6 +42,9 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
   const [failedIcons, setFailedIcons] = useState<Set<string>>(new Set());
   const [filterCategory, setFilterCategory] = useState<FilterCategory>("all");
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [cacheStats, setCacheStats] = useState<any>(null);
+  const [refreshCounter, setRefreshCounter] = useState(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
@@ -75,9 +78,21 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
     // Listen to provider updates
     const unsubscribe = appSearchProvider.subscribe(() => {
       // Trigger a search to refresh the list when cache updates
-      console.log("App cache updated, icon data may have been received.");
-      setSearchTerm((prevTerm) => prevTerm); // Re-trigger search with current term
+      console.log("[AppSearch] App cache updated, icon data may have been received. Forcing refresh...");
+      
+      // Force a state update to trigger re-render
+      setRefreshCounter(prev => prev + 1);
+      
+      // Also force a search refresh
+      setSearchTerm((prevTerm) => {
+        console.log(`[AppSearch] Current search term: "${prevTerm}"`);
+        return prevTerm; // This will trigger useEffect below
+      });
     });
+    
+    // Initial cache stats
+    refreshCacheStats();
+    
     return unsubscribe;
   }, [appSearchProvider]);
 
@@ -95,6 +110,11 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
         }
 
         setFilteredApps(filteredResults);
+        
+        // Update cache stats for debugging
+        if (appSearchProvider.getCacheStats) {
+          setCacheStats(appSearchProvider.getCacheStats());
+        }
       } catch (error) {
         console.error("Error searching apps:", error);
         setLoadError("Failed to search applications.");
@@ -105,7 +125,7 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
     };
 
     performSearch();
-  }, [searchTerm, appSearchProvider, filterCategory]);
+  }, [searchTerm, appSearchProvider, filterCategory, refreshCounter]);
 
   // Scroll selected item into view
   useEffect(() => {
@@ -261,7 +281,12 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
 
   const renderAppIcon = (searchResult: SearchResult) => {
     const appPath = searchResult.metadata?.path || searchResult.id;
-    const iconData = searchResult.metadata?.rawIcon || searchResult.icon;
+    let iconData = searchResult.icon;
+
+    // Try to get icon from metadata if not in main icon field
+    if (!iconData && searchResult.metadata?.rawIcon) {
+      iconData = searchResult.metadata.rawIcon;
+    }
 
     // If icon failed before, use fallback immediately
     if (failedIcons.has(appPath)) {
@@ -269,13 +294,14 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
     }
 
     // Check if we have valid icon data
-    if (!iconData || typeof iconData !== 'string' || iconData.length < 10) {
+    if (!iconData || typeof iconData !== 'string' || iconData.length < 50) {
       return <Laptop className="h-6 w-6 text-gray-400" />;
     }
 
     // Ensure proper data URL format
     let processedIconData = iconData;
     if (!iconData.startsWith('data:')) {
+      // Add proper data URL prefix for PNG
       processedIconData = `data:image/png;base64,${iconData}`;
     }
 
@@ -284,15 +310,29 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
         <img
           src={processedIconData}
           alt={`${searchResult.title} icon`}
-          className="w-full h-full object-contain rounded-sm transition-opacity duration-200"
-          onError={() => handleImageError(appPath)}
+          className="w-full h-full object-contain rounded-sm"
+          onError={(e) => {
+            console.error(`[renderAppIcon] Image failed for ${searchResult.title}`, { 
+              srcLength: processedIconData.length,
+              isDataUrl: processedIconData.startsWith('data:')
+            });
+            handleImageError(appPath);
+            // Hide the broken image and show fallback
+            (e.target as HTMLImageElement).style.display = 'none';
+          }}
+          onLoad={() => {
+            console.log(`[renderAppIcon] ✅ Image loaded successfully for ${searchResult.title}`);
+          }}
           loading="lazy"
           style={{
-            imageRendering: 'crisp-edges',
+            imageRendering: 'auto',
             minWidth: '24px',
             minHeight: '24px'
           }}
         />
+        {failedIcons.has(appPath) && (
+          <Laptop className="h-6 w-6 text-gray-400 absolute inset-0" />
+        )}
       </div>
     );
   };
@@ -313,6 +353,63 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
         return "Productivity";
       default:
         return "Unknown";
+    }
+  };
+
+  const refreshCacheStats = () => {
+    if (appSearchProvider.getCacheStats) {
+      setCacheStats(appSearchProvider.getCacheStats());
+    }
+  };
+
+  const manualRefresh = async () => {
+    console.log('[DEBUG] Manual refresh triggered');
+    // Force reload apps
+    setIsLoading(true);
+    try {
+      // Clear failed icons cache to retry all icons
+      setFailedIcons(new Set());
+      
+      const results = await appSearchProvider.search(searchTerm);
+      let filteredResults = results;
+      if (filterCategory !== "all") {
+        filteredResults = filterAppsByCategory(results, filterCategory);
+      }
+      setFilteredApps(filteredResults);
+      refreshCacheStats();
+    } catch (error) {
+      console.error("Error during manual refresh:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const forceReloadApps = async () => {
+    console.log('[DEBUG] Force reload apps triggered');
+    setIsLoading(true);
+    try {
+      // Clear all caches
+      setFailedIcons(new Set());
+      
+      // Recreate the provider to force fresh data
+      const electron = window.electron as any;
+      if (electron?.app?.getApplications) {
+        const freshApps = await electron.app.getApplications();
+        console.log(`[DEBUG] Got ${freshApps?.length || 0} fresh apps from main process`);
+        
+        // Force a fresh search
+        const results = await appSearchProvider.search(searchTerm);
+        let filteredResults = results;
+        if (filterCategory !== "all") {
+          filteredResults = filterAppsByCategory(results, filterCategory);
+        }
+        setFilteredApps(filteredResults);
+        refreshCacheStats();
+      }
+    } catch (error) {
+      console.error("Error during force reload:", error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -460,6 +557,109 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
       <div className="p-3 border-t border-gray-800 bg-gray-900 text-xs text-gray-500 flex justify-between">
         <span>{filteredApps.length} results</span>
         <span>↑↓ Navigate | ↵ Select | Esc Back</span>
+      </div>
+
+      {/* Debug Panel */}
+      <div className="border-t border-gray-800 bg-gray-950">
+        <button
+          onClick={() => setShowDebugPanel(!showDebugPanel)}
+          className="w-full p-2 text-xs text-gray-400 hover:text-gray-300 transition-colors"
+        >
+          {showDebugPanel ? '🔼' : '🔽'} Debug Panel
+        </button>
+        
+        {showDebugPanel && (
+          <div className="p-3 text-xs space-y-2 border-t border-gray-800">
+            <div className="flex gap-2">
+              <button
+                onClick={manualRefresh}
+                className="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                disabled={isLoading}
+              >
+                {isLoading ? '⏳' : '🔄'} Refresh Apps
+              </button>
+              <button
+                onClick={forceReloadApps}
+                className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+              >
+                🔄 Force Reload Apps
+              </button>
+              <button
+                onClick={refreshCacheStats}
+                className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+              >
+                📊 Update Stats
+              </button>
+            </div>
+            
+            {cacheStats && (
+              <div className="grid grid-cols-2 gap-4 text-gray-300">
+                <div>
+                  <div className="font-semibold text-blue-400">Cache Stats:</div>
+                  <div>Total Apps: {cacheStats.totalApps}</div>
+                  <div>With Icons: {cacheStats.appsWithIcons}</div>
+                  <div>Without Icons: {cacheStats.appsWithoutIcons}</div>
+                </div>
+                <div>
+                  <div className="font-semibold text-green-400">Sample With Icons:</div>
+                  {cacheStats.sampleAppsWithIcons.map((app: any, idx: number) => (
+                    <div key={idx} className="truncate">
+                      {app.name} ({app.iconLength}chars)
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            <div className="pt-2 border-t border-gray-800">
+              <div className="font-semibold text-yellow-400">Test Image:</div>
+              <div className="flex items-center gap-2">
+                <img 
+                  src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+                  alt="Test 1x1 red pixel"
+                  className="w-4 h-4 bg-red-500"
+                  onLoad={() => console.log('[DEBUG] ✅ Test image loaded successfully')}
+                  onError={() => console.log('[DEBUG] ❌ Test image failed to load')}
+                />
+                <span className="text-gray-400">1x1 test pixel (CSP check)</span>
+              </div>
+              
+              {/* Test with a sample app icon if we have one */}
+              {filteredApps.length > 0 && filteredApps.find(app => app.icon) && (
+                <div className="mt-2">
+                  <div className="font-semibold text-green-400">Sample App Icon:</div>
+                  <div className="flex items-center gap-2">
+                    {(() => {
+                      const appWithIcon = filteredApps.find(app => app.icon);
+                      if (!appWithIcon) return null;
+                      
+                      console.log('[DEBUG] Testing app icon:', {
+                        name: appWithIcon.title,
+                        iconLength: typeof appWithIcon.icon === 'string' ? appWithIcon.icon.length : 0,
+                        iconPreview: typeof appWithIcon.icon === 'string' ? appWithIcon.icon.substring(0, 100) : 'not string'
+                      });
+                      
+                      return (
+                        <>
+                          <img 
+                            src={typeof appWithIcon.icon === 'string' && appWithIcon.icon.startsWith('data:') 
+                              ? appWithIcon.icon 
+                              : `data:image/png;base64,${appWithIcon.icon}`}
+                            alt={`${appWithIcon.title} test icon`}
+                            className="w-8 h-8 border border-gray-600 rounded"
+                            onLoad={() => console.log(`[DEBUG] ✅ Sample app icon loaded for ${appWithIcon.title}`)}
+                            onError={() => console.log(`[DEBUG] ❌ Sample app icon failed for ${appWithIcon.title}`)}
+                          />
+                          <span className="text-gray-400">{appWithIcon.title} icon</span>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

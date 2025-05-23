@@ -48,7 +48,7 @@ export class AppSearchProvider implements SearchProvider {
           ...app,
           icon: app.icon || "",
         }));
-        // console.log(`[AppSearchProvider] Initialized with ${this.appCache.length} apps.`);
+        console.log(`[AppSearchProvider] Initialized with ${this.appCache.length} apps, ${this.appCache.filter(app => app.icon).length} with icons`);
         if (this.onCacheUpdate) this.onCacheUpdate();
       }
 
@@ -86,11 +86,29 @@ export class AppSearchProvider implements SearchProvider {
 
       // Check if the onUpdatedAppIcons function exists at runtime
       if (typeof electron?.app?.onUpdatedAppIcons === "function") {
-        // console.log('[AppSearchProvider] Setting up listener for updated app icons.');
+        console.log('[AppSearchProvider] ✅ Setting up listener for updated app icons.');
         electron.app.onUpdatedAppIcons(
           (updatedAppsWithIcons: Application[]) => {
-            // console.log(`[AppSearchProvider] Received ${updatedAppsWithIcons.length} updated app icons.`);
+            console.log(`[AppSearchProvider] 📨 Received ${updatedAppsWithIcons.length} updated app icons from main process`);
+            
+            // Log first few apps for debugging
+            if (updatedAppsWithIcons.length > 0) {
+              const firstApp = updatedAppsWithIcons[0];
+              console.log(`[AppSearchProvider] 🔍 First app: "${firstApp.name}", icon length: ${firstApp.icon?.length || 0}`);
+              
+              // More comprehensive debugging
+              updatedAppsWithIcons.slice(0, 3).forEach(app => {
+                console.log(`[AppSearchProvider] App "${app.name}":`, {
+                  hasIcon: !!app.icon,
+                  iconLength: app.icon?.length || 0,
+                  iconPreview: app.icon ? app.icon.substring(0, 100) + '...' : 'no icon',
+                  startsWithData: app.icon ? app.icon.startsWith('data:') : false
+                });
+              });
+            }
+            
             let cacheChanged = false;
+            let updatedCount = 0;
 
             // Create a map for fast lookup
             const updateMap = new Map(
@@ -102,17 +120,36 @@ export class AppSearchProvider implements SearchProvider {
               if (
                 updatedApp &&
                 updatedApp.icon &&
+                updatedApp.icon.length > 10 && // Only update with valid icons
                 cachedApp.icon !== updatedApp.icon
               ) {
+                console.log(`[AppSearchProvider] 🔄 Updating icon for "${cachedApp.name}" (${updatedApp.icon.length} chars)`);
                 cacheChanged = true;
+                updatedCount++;
                 return { ...cachedApp, icon: updatedApp.icon };
               }
               return cachedApp;
             });
 
-            if (cacheChanged && this.onCacheUpdate) this.onCacheUpdate();
+            if (cacheChanged) {
+              console.log(`[AppSearchProvider] 🎯 Cache updated! ${updatedCount} icons updated. Notifying components...`);
+              if (this.onCacheUpdate) {
+                console.log(`[AppSearchProvider] 📢 Calling onCacheUpdate callback`);
+                this.onCacheUpdate();
+              } else {
+                console.warn(`[AppSearchProvider] ⚠️ No onCacheUpdate callback registered`);
+              }
+            } else {
+              console.log(`[AppSearchProvider] ⚠️ No cache changes detected from this batch of ${updatedAppsWithIcons.length} apps`);
+              // Still trigger an update to ensure UI refreshes
+              if (this.onCacheUpdate) {
+                this.onCacheUpdate();
+              }
+            }
           },
         );
+      } else {
+        console.warn('[AppSearchProvider] ❌ onUpdatedAppIcons function not available in electron.app');
       }
     } catch (error) {
       console.error(
@@ -141,15 +178,48 @@ export class AppSearchProvider implements SearchProvider {
     return this.appCache.slice(0, 5).map((app) => this.appToSearchResult(app));
   }
 
+  getCacheStats() {
+    const appsWithIcons = this.appCache.filter(app => app.icon && app.icon.length > 0);
+    const appsWithoutIcons = this.appCache.filter(app => !app.icon || app.icon.length === 0);
+    
+    return {
+      totalApps: this.appCache.length,
+      appsWithIcons: appsWithIcons.length,
+      appsWithoutIcons: appsWithoutIcons.length,
+      sampleAppsWithIcons: appsWithIcons.slice(0, 3).map(app => ({
+        name: app.name,
+        hasIcon: !!app.icon,
+        iconLength: app.icon?.length || 0
+      })),
+      sampleAppsWithoutIcons: appsWithoutIcons.slice(0, 3).map(app => ({
+        name: app.name,
+        hasIcon: !!app.icon,
+        iconLength: app.icon?.length || 0
+      }))
+    };
+  }
+
   private appToSearchResult(app: Application): SearchResult {
     const electron = window.electron as any;
+
+    // Debug logging for icon processing
+    console.log(`[AppProvider] Converting "${app.name}" to SearchResult:`, {
+      hasIcon: !!app.icon,
+      iconLength: app.icon?.length || 0,
+      iconPreview: app.icon ? app.icon.substring(0, 100) + '...' : 'no icon',
+      startsWithData: app.icon ? app.icon.startsWith('data:') : false
+    });
 
     return {
       id: `app:${app.path}`,
       title: app.name,
       description: app.path,
-      icon: app.icon || undefined, // Pass base64 string or undefined (renderer will use fallback)
+      icon: app.icon || "", // Always pass the icon, even if empty
       provider: this.id,
+      metadata: {
+        path: app.path,
+        rawIcon: app.icon // Also store in metadata as backup
+      },
       action: () => {
         if (electron?.app?.launchApplication) {
           electron.app
@@ -165,17 +235,10 @@ export class AppSearchProvider implements SearchProvider {
           action: () => {
             if (electron?.clipboard?.writeText) {
               electron.clipboard.writeText(app.path);
-            } else if (navigator.clipboard) {
-              navigator.clipboard.writeText(app.path);
             }
           },
         },
       ],
-      metadata: {
-        type: "application",
-        path: app.path,
-        rawIcon: app.icon, // Keep raw base64 for potential direct use in img src
-      },
     };
   }
 }

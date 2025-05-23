@@ -5,9 +5,11 @@ const { exec } = require('child_process');
 const plist = require('plist');
 const { Icns } = require('@fiahfy/icns');
 const isDev = process.env.NODE_ENV === 'development';
+const os = require('os');
 
 // Keep a global reference to prevent garbage collection
 let mainWindow;
+let pasteStackWindow;
 
 function createMainWindow() {
   // Create the browser window
@@ -48,6 +50,51 @@ function createMainWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+}
+
+function createPasteStackWindow() {
+  // Create the paste stack window
+  pasteStackWindow = new BrowserWindow({
+    width: 600,
+    height: 400,
+    minWidth: 500,
+    minHeight: 300,
+    titleBarStyle: 'hidden',
+    trafficLightPosition: { x: -999, y: -999 },
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+    backgroundColor: '#000000',
+    show: false,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true, // Don't show in taskbar/dock
+  });
+
+  // Load the paste stack page
+  const pasteStackUrl = isDev
+    ? 'http://localhost:3000/paste-stack'
+    : `file://${path.join(__dirname, './out/paste-stack.html')}`;
+
+  pasteStackWindow.loadURL(pasteStackUrl);
+
+  // Show window when ready
+  pasteStackWindow.once('ready-to-show', () => {
+    pasteStackWindow.show();
+    pasteStackWindow.focus();
+  });
+
+  // Hide instead of close on window close
+  pasteStackWindow.on('close', (e) => {
+    e.preventDefault();
+    pasteStackWindow.hide();
+  });
+
+  pasteStackWindow.on('closed', () => {
+    pasteStackWindow = null;
   });
 }
 
@@ -133,6 +180,16 @@ function registerGlobalShortcuts() {
           } else {
             mainWindow.show();
             mainWindow.focus();
+          }
+        } else if (id === 'paste-stack') {
+          // Special handling for paste stack - show separate window
+          if (!pasteStackWindow) {
+            createPasteStackWindow();
+          } else if (pasteStackWindow.isVisible()) {
+            pasteStackWindow.hide();
+          } else {
+            pasteStackWindow.show();
+            pasteStackWindow.focus();
           }
         } else {
           // For other shortcuts, show window and send command to renderer
@@ -728,5 +785,449 @@ ipcMain.handle('execute-menu-item', async (event, menuPath) => {
   } catch (error) {
     console.error('Error executing menu item:', error);
     return { error: 'Failed to execute menu item: ' + error.message };
+  }
+});
+
+// File system operations
+
+// Get home directory
+ipcMain.handle('get-home-directory', async () => {
+  try {
+    return os.homedir();
+  } catch (error) {
+    console.error('Error getting home directory:', error);
+    return '/';
+  }
+});
+
+// Read directory contents
+ipcMain.handle('read-directory', async (event, dirPath) => {
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    
+    const results = entries.map(entry => {
+      const fullPath = path.join(dirPath, entry.name);
+      let stats = null;
+      
+      try {
+        stats = fs.statSync(fullPath);
+      } catch (err) {
+        // Ignore permission errors or other issues
+      }
+      
+      return {
+        name: entry.name,
+        path: fullPath,
+        isDirectory: entry.isDirectory(),
+        size: stats ? stats.size : undefined,
+        modified: stats ? stats.mtime : undefined
+      };
+    });
+    
+    // Sort directories first, then files, alphabetically
+    results.sort((a, b) => {
+      if (a.isDirectory && !b.isDirectory) return -1;
+      if (!a.isDirectory && b.isDirectory) return 1;
+      return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+    });
+    
+    return results;
+  } catch (error) {
+    console.error('Error reading directory:', error);
+    throw new Error(`Failed to read directory: ${error.message}`);
+  }
+});
+
+// Search for files and folders
+ipcMain.handle('search-files', async (event, query, basePath) => {
+  try {
+    const results = [];
+    const searchQuery = query.toLowerCase();
+    
+    // Recursive function to search directories
+    function searchDirectory(dirPath, maxDepth = 3, currentDepth = 0) {
+      if (currentDepth >= maxDepth) return;
+      
+      try {
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+        
+        for (const entry of entries) {
+          // Skip hidden files and system directories
+          if (entry.name.startsWith('.')) continue;
+          
+          const fullPath = path.join(dirPath, entry.name);
+          
+          // Check if name matches search query
+          if (entry.name.toLowerCase().includes(searchQuery)) {
+            let stats = null;
+            try {
+              stats = fs.statSync(fullPath);
+            } catch (err) {
+              // Ignore permission errors
+            }
+            
+            results.push({
+              name: entry.name,
+              path: fullPath,
+              isDirectory: entry.isDirectory(),
+              size: stats ? stats.size : undefined,
+              modified: stats ? stats.mtime : undefined
+            });
+          }
+          
+          // Recursively search subdirectories
+          if (entry.isDirectory()) {
+            searchDirectory(fullPath, maxDepth, currentDepth + 1);
+          }
+        }
+      } catch (err) {
+        // Ignore permission errors or other issues
+      }
+    }
+    
+    searchDirectory(basePath || os.homedir());
+    
+    // Sort results by relevance (exact matches first, then directories, then files)
+    results.sort((a, b) => {
+      const aExact = a.name.toLowerCase() === searchQuery;
+      const bExact = b.name.toLowerCase() === searchQuery;
+      
+      if (aExact && !bExact) return -1;
+      if (!aExact && bExact) return 1;
+      
+      if (a.isDirectory && !b.isDirectory) return -1;
+      if (!a.isDirectory && b.isDirectory) return 1;
+      
+      return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+    });
+    
+    // Limit results to prevent overwhelming the UI
+    return results.slice(0, 100);
+  } catch (error) {
+    console.error('Error searching files:', error);
+    throw new Error(`Failed to search files: ${error.message}`);
+  }
+});
+
+// Open file with default application
+ipcMain.handle('open-file', async (event, filePath) => {
+  try {
+    await shell.openPath(filePath);
+    return { success: true };
+  } catch (error) {
+    console.error('Error opening file:', error);
+    throw new Error(`Failed to open file: ${error.message}`);
+  }
+});
+
+// Window management handlers (macOS only)
+ipcMain.handle('get-windows', async () => {
+  if (process.platform !== 'darwin') {
+    return { error: 'Window management is only available on macOS' };
+  }
+
+  try {
+    const script = `
+    tell application "System Events"
+      set windowList to {}
+      set processlist to every application process whose visible is true
+      
+      repeat with proc in processlist
+        set procName to name of proc
+        set procWindows to windows of proc
+        
+        repeat with win in procWindows
+          try
+            set winTitle to title of win
+            set winPos to position of win
+            set winSize to size of win
+            set winMinimized to false
+            
+            -- Check if window is minimized
+            try
+              set winMinimized to (miniaturized of win)
+            end try
+            
+            if winTitle is not "" and winTitle is not missing value then
+              set windowInfo to {appName:procName, title:winTitle, x:(item 1 of winPos), y:(item 2 of winPos), width:(item 1 of winSize), height:(item 2 of winSize), isMinimized:winMinimized}
+              set windowList to windowList & {windowInfo}
+            end if
+          on error
+            -- Skip windows that can't be accessed
+          end try
+        end repeat
+      end repeat
+      
+      return my listToJSON(windowList)
+    end tell
+
+    on listToJSON(lst)
+      set jsonText to "["
+      set itemCount to count of lst
+      repeat with i from 1 to itemCount
+        set currentItem to item i of lst
+        set jsonText to jsonText & recordToJSON(currentItem)
+        if i < itemCount then set jsonText to jsonText & ","
+      end repeat
+      set jsonText to jsonText & "]"
+      return jsonText
+    end listToJSON
+
+    on recordToJSON(rec)
+      return "{\"appName\":\"" & (appName of rec) & "\",\"title\":\"" & (title of rec) & "\",\"x\":" & (x of rec) & ",\"y\":" & (y of rec) & ",\"width\":" & (width of rec) & ",\"height\":" & (height of rec) & ",\"isMinimized\":" & (isMinimized of rec) & "}"
+    end recordToJSON
+    `;
+
+    return new Promise((resolve, reject) => {
+      exec(`osascript -e '${script}'`, { maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
+        if (error) {
+          console.error('Error getting windows:', error);
+          resolve({ error: 'Failed to get windows: ' + error.message });
+          return;
+        }
+        
+        try {
+          const cleanOutput = stdout.trim();
+          let result;
+          
+          if (cleanOutput.startsWith('[') && cleanOutput.endsWith(']')) {
+            result = JSON.parse(cleanOutput);
+          } else {
+            // Fallback parsing for older format
+            result = JSON.parse(cleanOutput.replace(/[\r\n]/g, ''));
+          }
+          
+          console.log(`[get-windows] Found ${result.length} windows`);
+          resolve({ windows: result });
+        } catch (parseError) {
+          console.error('Error parsing windows data:', parseError);
+          console.error('Raw output:', stdout);
+          // Return empty array instead of error for better UX
+          resolve({ windows: [] });
+        }
+      });
+    });
+  } catch (error) {
+    console.error('Error fetching windows:', error);
+    return { error: 'Failed to get windows: ' + error.message };
+  }
+});
+
+ipcMain.handle('resize-window', async (event, action) => {
+  if (process.platform !== 'darwin') {
+    return { error: 'Window management is only available on macOS' };
+  }
+
+  try {
+    // First get screen dimensions
+    const screenScript = `
+    tell application "System Events"
+      set screenSize to size of first desktop
+      return screenSize
+    end tell
+    `;
+    
+    const screenSize = await new Promise((resolve, reject) => {
+      exec(`osascript -e '${screenScript}'`, (error, stdout, stderr) => {
+        if (error) {
+          console.error('Error getting screen size:', error);
+          resolve([1920, 1080]); // fallback
+          return;
+        }
+        try {
+          // Parse output like "{1920, 1080}"
+          const match = stdout.match(/\{(\d+),\s*(\d+)\}/);
+          if (match) {
+            resolve([parseInt(match[1]), parseInt(match[2])]);
+          } else {
+            resolve([1920, 1080]); // fallback
+          }
+        } catch (e) {
+          resolve([1920, 1080]); // fallback
+        }
+      });
+    });
+
+    const [screenWidth, screenHeight] = screenSize;
+    const menuBarHeight = 25; // Approximate menu bar height
+    const availableHeight = screenHeight - menuBarHeight;
+    
+    let script = '';
+    
+    switch (action) {
+      case 'left-half':
+        script = `
+        tell application "System Events"
+          set frontApp to first application process whose frontmost is true
+          if (count of windows of frontApp) > 0 then
+            tell window 1 of frontApp
+              set bounds to {0, ${menuBarHeight}, ${Math.floor(screenWidth / 2)}, ${screenHeight}}
+            end tell
+          end if
+        end tell
+        `;
+        break;
+        
+      case 'right-half':
+        script = `
+        tell application "System Events"
+          set frontApp to first application process whose frontmost is true
+          if (count of windows of frontApp) > 0 then
+            tell window 1 of frontApp
+              set bounds to {${Math.floor(screenWidth / 2)}, ${menuBarHeight}, ${screenWidth}, ${screenHeight}}
+            end tell
+          end if
+        end tell
+        `;
+        break;
+        
+      case 'maximize':
+        script = `
+        tell application "System Events"
+          set frontApp to first application process whose frontmost is true
+          if (count of windows of frontApp) > 0 then
+            tell window 1 of frontApp
+              set bounds to {0, ${menuBarHeight}, ${screenWidth}, ${screenHeight}}
+            end tell
+          end if
+        end tell
+        `;
+        break;
+        
+      case 'center':
+        const centerWidth = Math.floor(screenWidth * 0.7);
+        const centerHeight = Math.floor(availableHeight * 0.8);
+        const centerX = Math.floor((screenWidth - centerWidth) / 2);
+        const centerY = Math.floor((availableHeight - centerHeight) / 2) + menuBarHeight;
+        
+        script = `
+        tell application "System Events"
+          set frontApp to first application process whose frontmost is true
+          if (count of windows of frontApp) > 0 then
+            tell window 1 of frontApp
+              set bounds to {${centerX}, ${centerY}, ${centerX + centerWidth}, ${centerY + centerHeight}}
+            end tell
+          end if
+        end tell
+        `;
+        break;
+        
+      default:
+        return { error: 'Unknown window action: ' + action };
+    }
+
+    return new Promise((resolve, reject) => {
+      exec(`osascript -e '${script}'`, (error, stdout, stderr) => {
+        if (error) {
+          console.error('Error resizing window:', error);
+          resolve({ error: 'Failed to resize window: ' + error.message });
+          return;
+        }
+        console.log(`[resize-window] Successfully executed ${action} on ${screenWidth}x${screenHeight} screen`);
+        resolve({ success: true });
+      });
+    });
+  } catch (error) {
+    console.error('Error resizing window:', error);
+    return { error: 'Failed to resize window: ' + error.message };
+  }
+});
+
+ipcMain.handle('minimize-window-by-id', async (event, windowTitle) => {
+  if (process.platform !== 'darwin') {
+    return { error: 'Window management is only available on macOS' };
+  }
+
+  try {
+    const script = `
+    tell application "System Events"
+      set processlist to every application process whose visible is true
+      
+      repeat with proc in processlist
+        set procWindows to windows of proc
+        
+        repeat with win in procWindows
+          try
+            if title of win is "${windowTitle}" then
+              set miniaturized of win to true
+              return {success:true}
+            end if
+          end try
+        end repeat
+      end repeat
+      
+      return {error:"Window not found"}
+    end tell
+    `;
+
+    return new Promise((resolve, reject) => {
+      exec(`osascript -e '${script}'`, (error, stdout, stderr) => {
+        if (error) {
+          console.error('Error minimizing window:', error);
+          resolve({ error: 'Failed to minimize window: ' + error.message });
+          return;
+        }
+        
+        try {
+          const result = JSON.parse(stdout.replace(/[\r\n]/g, ''));
+          resolve(result);
+        } catch (parseError) {
+          resolve({ success: true }); // Assume success if no error
+        }
+      });
+    });
+  } catch (error) {
+    console.error('Error minimizing window:', error);
+    return { error: 'Failed to minimize window: ' + error.message };
+  }
+});
+
+ipcMain.handle('focus-window-by-title', async (event, windowTitle) => {
+  if (process.platform !== 'darwin') {
+    return { error: 'Window management is only available on macOS' };
+  }
+
+  try {
+    const script = `
+    tell application "System Events"
+      set processlist to every application process whose visible is true
+      
+      repeat with proc in processlist
+        set procWindows to windows of proc
+        
+        repeat with win in procWindows
+          try
+            if title of win is "${windowTitle}" then
+              set frontmost of proc to true
+              perform action "AXRaise" of win
+              return {success:true}
+            end if
+          end try
+        end repeat
+      end repeat
+      
+      return {error:"Window not found"}
+    end tell
+    `;
+
+    return new Promise((resolve, reject) => {
+      exec(`osascript -e '${script}'`, (error, stdout, stderr) => {
+        if (error) {
+          console.error('Error focusing window:', error);
+          resolve({ error: 'Failed to focus window: ' + error.message });
+          return;
+        }
+        
+        try {
+          const result = JSON.parse(stdout.replace(/[\r\n]/g, ''));
+          resolve(result);
+        } catch (parseError) {
+          resolve({ success: true }); // Assume success if no error
+        }
+      });
+    });
+  } catch (error) {
+    console.error('Error focusing window:', error);
+    return { error: 'Failed to focus window: ' + error.message };
   }
 });

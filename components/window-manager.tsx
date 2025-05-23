@@ -1,550 +1,469 @@
 "use client";
 
-import React, { useState } from "react";
-import {
-  ArrowLeft,
-  Monitor,
-  Maximize2,
-  Minimize2,
+import React, { useState, useEffect, useRef } from "react";
+import { 
+  Search, 
+  Monitor, 
+  Square, 
+  Maximize, 
+  Minimize2, 
   Move,
-  Grid3X3,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
   RotateCw,
-  Eye,
-  EyeOff,
-  Layers,
+  Grid3X3,
+  SplitSquareVertical,
+  SplitSquareHorizontal,
+  Laptop
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
+type ViewType = 
+  | "command" 
+  | "clipboard" 
+  | "pasteStack" 
+  | "snippets" 
+  | "appSearch" 
+  | "preferences" 
+  | "contextualShortcuts" 
+  | "calculator" 
+  | "menuSearch" 
+  | "notes" 
+  | "multiClipboard"
+  | "emojiSearch"
+  | "aiChat"
+  | "fileSearch"
+  | "windowManager";
+
 interface WindowManagerProps {
-  onViewChange: (view: string) => void;
+  onViewChange: (view: ViewType) => void;
 }
 
 interface WindowInfo {
   id: string;
   title: string;
   app: string;
-  isVisible: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
   isMinimized: boolean;
-  position: { x: number; y: number };
-  size: { width: number; height: number };
+  isActive: boolean;
 }
 
-// Mock window data for demonstration
-const MOCK_WINDOWS: WindowInfo[] = [
-  {
-    id: "1",
-    title: "OmniLaunch",
-    app: "OmniLaunch",
-    isVisible: true,
-    isMinimized: false,
-    position: { x: 100, y: 100 },
-    size: { width: 800, height: 600 },
-  },
-  {
-    id: "2",
-    title: "Visual Studio Code",
-    app: "Code",
-    isVisible: true,
-    isMinimized: false,
-    position: { x: 200, y: 150 },
-    size: { width: 1200, height: 800 },
-  },
-  {
-    id: "3",
-    title: "Safari",
-    app: "Safari",
-    isVisible: true,
-    isMinimized: true,
-    position: { x: 300, y: 200 },
-    size: { width: 1000, height: 700 },
-  },
-];
-
-// Window layout presets
-const LAYOUT_PRESETS = [
-  {
-    id: "split-left-right",
-    name: "Split Left/Right",
-    icon: <Grid3X3 className="h-4 w-4" />,
-    description: "Split screen with two windows side by side",
-  },
-  {
-    id: "split-top-bottom",
-    name: "Split Top/Bottom",
-    icon: <Grid3X3 className="h-4 w-4 rotate-90" />,
-    description: "Split screen with windows stacked vertically",
-  },
-  {
-    id: "quarters",
-    name: "Quarters",
-    icon: <Grid3X3 className="h-4 w-4" />,
-    description: "Divide screen into four equal quadrants",
-  },
-  {
-    id: "center-focus",
-    name: "Center Focus",
-    icon: <Maximize2 className="h-4 w-4" />,
-    description: "Center main window with others minimized",
-  },
-];
-
-// Desktop spaces
-const DESKTOP_SPACES = [
-  { id: 1, name: "Main", active: true, windows: 3 },
-  { id: 2, name: "Development", active: false, windows: 2 },
-  { id: 3, name: "Communication", active: false, windows: 1 },
-  { id: 4, name: "Design", active: false, windows: 0 },
-];
+interface WindowAction {
+  id: string;
+  name: string;
+  description: string;
+  icon: React.ReactNode;
+  action: () => void;
+  shortcut?: string;
+}
 
 export function WindowManager({ onViewChange }: WindowManagerProps) {
-  const [windows, setWindows] = useState<WindowInfo[]>(MOCK_WINDOWS);
-  const [selectedWindows, setSelectedWindows] = useState<string[]>([]);
-  const [activeSpace, setActiveSpace] = useState(1);
-  const [spaces, setSpaces] = useState(DESKTOP_SPACES);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [windows, setWindows] = useState<WindowInfo[]>([]);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [activeMode, setActiveMode] = useState<'windows' | 'actions'>('actions');
+  
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const selectedItemRef = useRef<HTMLLIElement>(null);
 
-  // Toggle window selection
-  const toggleWindowSelection = (windowId: string) => {
-    setSelectedWindows((prev) =>
-      prev.includes(windowId)
-        ? prev.filter((id) => id !== windowId)
-        : [...prev, windowId],
-    );
-  };
+  // Window management actions
+  const windowActions: WindowAction[] = [
+    {
+      id: 'left-half',
+      name: 'Left Half',
+      description: 'Move active window to left half of screen',
+      icon: <SplitSquareVertical className="h-5 w-5 rotate-180" />,
+      action: () => resizeWindow('left-half'),
+      shortcut: '⌘ ←'
+    },
+    {
+      id: 'right-half',
+      name: 'Right Half',
+      description: 'Move active window to right half of screen',
+      icon: <SplitSquareVertical className="h-5 w-5" />,
+      action: () => resizeWindow('right-half'),
+      shortcut: '⌘ →'
+    },
+    {
+      id: 'maximize',
+      name: 'Maximize',
+      description: 'Maximize active window to full screen',
+      icon: <Maximize className="h-5 w-5" />,
+      action: () => resizeWindow('maximize'),
+      shortcut: '⌘ M'
+    },
+    {
+      id: 'center',
+      name: 'Center Window',
+      description: 'Center active window on screen',
+      icon: <Move className="h-5 w-5" />,
+      action: () => resizeWindow('center'),
+      shortcut: '⌘ C'
+    },
+    {
+      id: 'minimize',
+      name: 'Minimize',
+      description: 'Minimize active window',
+      icon: <Minimize2 className="h-5 w-5" />,
+      action: () => minimizeWindow(),
+      shortcut: '⌘ H'
+    }
+  ];
 
-  // Apply layout preset
-  const applyLayout = (layoutId: string) => {
-    // Get screen dimensions (simplified - in real app would use Electron APIs)
-    const screenWidth = 1920;
-    const screenHeight = 1080;
-    const visibleWindows = windows.filter(w => w.isVisible && !w.isMinimized);
-    
-    if (visibleWindows.length === 0) return;
+  // Focus search input on mount
+  useEffect(() => {
+    searchInputRef.current?.focus();
+    loadWindows();
+  }, []);
 
-    switch (layoutId) {
-      case "split-left-right": {
-        const windowWidth = Math.floor(screenWidth / visibleWindows.length);
-        setWindows(prev =>
-          prev.map(window => {
-            if (!window.isVisible || window.isMinimized) return window;
-            const index = visibleWindows.findIndex(w => w.id === window.id);
-            return {
-              ...window,
-              position: { x: index * windowWidth, y: 0 },
-              size: { width: windowWidth, height: screenHeight - 100 }
-            };
-          })
-        );
-        break;
-      }
-      case "split-top-bottom": {
-        const windowHeight = Math.floor((screenHeight - 100) / visibleWindows.length);
-        setWindows(prev =>
-          prev.map(window => {
-            if (!window.isVisible || window.isMinimized) return window;
-            const index = visibleWindows.findIndex(w => w.id === window.id);
-            return {
-              ...window,
-              position: { x: 0, y: index * windowHeight },
-              size: { width: screenWidth, height: windowHeight }
-            };
-          })
-        );
-        break;
-      }
-      case "quarters": {
-        const halfWidth = Math.floor(screenWidth / 2);
-        const halfHeight = Math.floor((screenHeight - 100) / 2);
-        const positions = [
-          { x: 0, y: 0 },
-          { x: halfWidth, y: 0 },
-          { x: 0, y: halfHeight },
-          { x: halfWidth, y: halfHeight }
+  // Load current windows (mock data for now)
+  const loadWindows = async () => {
+    setIsLoading(true);
+    try {
+      // Use real window management API
+      if (typeof window !== 'undefined' && window.electron?.windowManager?.getWindows) {
+        console.log('[WindowManager] Fetching real windows...');
+        const result = await window.electron.windowManager.getWindows();
+        
+        if ('error' in result) {
+          console.error('[WindowManager] Error fetching windows:', result.error);
+          setWindows([]);
+        } else {
+          const realWindows: WindowInfo[] = result.windows.map((win: any, index: number) => ({
+            id: `${win.appName}-${win.title}-${index}`,
+            title: win.title,
+            app: win.appName,
+            x: win.x,
+            y: win.y,
+            width: win.width,
+            height: win.height,
+            isMinimized: win.isMinimized,
+            isActive: index === 0 // Assume first window is active
+          }));
+          console.log(`[WindowManager] Loaded ${realWindows.length} real windows`);
+          setWindows(realWindows);
+        }
+      } else {
+        console.warn('[WindowManager] Window management API not available, using mock data');
+        // Fallback to mock data if API not available
+        const mockWindows: WindowInfo[] = [
+          {
+            id: '1',
+            title: 'VS Code - main.js',
+            app: 'Visual Studio Code',
+            x: 100,
+            y: 100,
+            width: 1200,
+            height: 800,
+            isMinimized: false,
+            isActive: true
+          },
+          {
+            id: '2',
+            title: 'Safari - GitHub',
+            app: 'Safari',
+            x: 200,
+            y: 200,
+            width: 1000,
+            height: 700,
+            isMinimized: false,
+            isActive: false
+          }
         ];
-        setWindows(prev =>
-          prev.map(window => {
-            if (!window.isVisible || window.isMinimized) return window;
-            const index = visibleWindows.findIndex(w => w.id === window.id);
-            const pos = positions[index % positions.length];
-            return {
-              ...window,
-              position: pos,
-              size: { width: halfWidth, height: halfHeight }
-            };
-          })
-        );
-        break;
+        setWindows(mockWindows);
       }
-      case "center-focus": {
-        const focusWidth = Math.floor(screenWidth * 0.7);
-        const focusHeight = Math.floor((screenHeight - 100) * 0.8);
-        setWindows(prev =>
-          prev.map(window => {
-            if (!window.isVisible || window.isMinimized) return window;
-            const index = visibleWindows.findIndex(w => w.id === window.id);
-            if (index === 0) {
-              // Center the first window
-              return {
-                ...window,
-                position: {
-                  x: Math.floor((screenWidth - focusWidth) / 2),
-                  y: Math.floor((screenHeight - focusHeight) / 2)
-                },
-                size: { width: focusWidth, height: focusHeight }
-              };
-            } else {
-              // Minimize other windows
-              return { ...window, isMinimized: true };
-            }
-          })
-        );
-        break;
-      }
-      default:
-        console.warn('Unknown layout:', layoutId);
+    } catch (error) {
+      console.error("Failed to load windows:", error);
+      setWindows([]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Window actions
-  const minimizeWindow = (windowId: string) => {
-    setWindows((prev) =>
-      prev.map((w) => (w.id === windowId ? { ...w, isMinimized: true } : w)),
-    );
-  };
-
-  const maximizeWindow = (windowId: string) => {
-    setWindows((prev) =>
-      prev.map((w) => (w.id === windowId ? { ...w, isMinimized: false } : w)),
-    );
-  };
-
-  const hideWindow = (windowId: string) => {
-    setWindows((prev) =>
-      prev.map((w) => (w.id === windowId ? { ...w, isVisible: false } : w)),
-    );
-  };
-
-  const showWindow = (windowId: string) => {
-    setWindows((prev) =>
-      prev.map((w) => (w.id === windowId ? { ...w, isVisible: true } : w)),
-    );
-  };
-
-  // Space management
-  const switchToSpace = (spaceId: number) => {
-    setSpaces((prev) =>
-      prev.map((space) => ({
-        ...space,
-        active: space.id === spaceId,
-      })),
-    );
-    setActiveSpace(spaceId);
-  };
-
-  const createNewSpace = () => {
-    // Limit to 10 spaces maximum
-    if (spaces.length >= 10) {
-      console.warn('Maximum number of spaces reached');
-      return;
+  // Window management actions
+  const resizeWindow = async (action: string) => {
+    try {
+      console.log(`Window resize action: ${action}`);
+      if (typeof window !== 'undefined' && window.electron?.windowManager?.resizeWindow) {
+        const result = await window.electron.windowManager.resizeWindow(action);
+        if ('error' in result) {
+          console.error('[WindowManager] Error resizing window:', result.error);
+        } else {
+          console.log('[WindowManager] Window resized successfully');
+        }
+      } else {
+        console.warn('[WindowManager] Window resize API not available');
+      }
+    } catch (error) {
+      console.error("Failed to resize window:", error);
     }
-
-    const maxId = Math.max(...spaces.map(s => s.id), 0);
-    const newSpace = {
-      id: maxId + 1,
-      name: `Space ${spaces.length + 1}`,
-      active: false,
-      windows: 0,
-    };
-    setSpaces((prev) => [...prev, newSpace]);
   };
+
+  const minimizeWindow = async () => {
+    try {
+      console.log("Minimizing window");
+      if (typeof window !== 'undefined' && window.electron?.windowManager?.resizeWindow) {
+        // Get the active window title first
+        const activeWindow = windows.find(w => w.isActive);
+        if (activeWindow && window.electron?.windowManager?.minimizeWindow) {
+          const result = await window.electron.windowManager.minimizeWindow(activeWindow.title);
+          if ('error' in result) {
+            console.error('[WindowManager] Error minimizing window:', result.error);
+          } else {
+            console.log('[WindowManager] Window minimized successfully');
+            // Refresh window list
+            loadWindows();
+          }
+        }
+      } else {
+        console.warn('[WindowManager] Window minimize API not available');
+      }
+    } catch (error) {
+      console.error("Failed to minimize window:", error);
+    }
+  };
+
+  const focusWindow = async (windowId: string) => {
+    try {
+      console.log(`Focusing window: ${windowId}`);
+      const targetWindow = windows.find(w => w.id === windowId);
+      if (targetWindow && typeof window !== 'undefined' && window.electron?.windowManager?.focusWindow) {
+        const result = await window.electron.windowManager.focusWindow(targetWindow.title);
+        if ('error' in result) {
+          console.error('[WindowManager] Error focusing window:', result.error);
+        } else {
+          console.log('[WindowManager] Window focused successfully');
+          // Refresh window list to update active state
+          loadWindows();
+        }
+      } else {
+        console.warn('[WindowManager] Window focus API not available or window not found');
+      }
+    } catch (error) {
+      console.error("Failed to focus window:", error);
+    }
+  };
+
+  // Filter windows and actions based on search
+  const filteredItems = searchQuery.trim() === "" 
+    ? (activeMode === 'actions' ? windowActions : windows)
+    : activeMode === 'actions' 
+      ? windowActions.filter(action => 
+          action.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          action.description.toLowerCase().includes(searchQuery.toLowerCase())
+        )
+      : windows.filter(window =>
+          window.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          window.app.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+
+  // Handle keyboard navigation
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        if (filteredItems.length > 0) {
+          setSelectedIndex((prev) => prev < filteredItems.length - 1 ? prev + 1 : prev);
+        }
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        setSelectedIndex((prev) => prev > 0 ? prev - 1 : prev);
+        break;
+      case "Enter":
+        if (filteredItems.length > 0 && selectedIndex >= 0 && selectedIndex < filteredItems.length) {
+          const item = filteredItems[selectedIndex];
+          if (activeMode === 'actions') {
+            (item as WindowAction).action();
+          } else {
+            focusWindow((item as WindowInfo).id);
+          }
+        }
+        break;
+      case "Escape":
+        if (searchQuery) {
+          setSearchQuery("");
+        } else {
+          onViewChange("command");
+        }
+        break;
+      case "Tab":
+        e.preventDefault();
+        setActiveMode(prev => prev === 'actions' ? 'windows' : 'actions');
+        setSelectedIndex(0);
+        break;
+    }
+  };
+
+  // Scroll selected item into view
+  useEffect(() => {
+    if (selectedItemRef.current && listRef.current) {
+      const container = listRef.current;
+      const item = selectedItemRef.current;
+      const containerRect = container.getBoundingClientRect();
+      const itemRect = item.getBoundingClientRect();
+      
+      if (itemRect.bottom > containerRect.bottom) {
+        container.scrollTop += itemRect.bottom - containerRect.bottom + 8;
+      } else if (itemRect.top < containerRect.top) {
+        container.scrollTop -= containerRect.top - itemRect.top + 8;
+      }
+    }
+  }, [selectedIndex]);
 
   return (
-    <div className="flex flex-col h-full bg-background">
+    <div className="flex flex-col h-full bg-gray-950 text-gray-100">
       {/* Header */}
-      <div className="flex items-center border-b p-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => onViewChange("command")}
-          className="mr-2"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
+      <div className="p-4 space-y-3">
+        {/* Search Input */}
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+            <Search className="h-5 w-5 text-blue-400" />
+          </div>
+          <input
+            ref={searchInputRef}
+            type="text"
+            className="block w-full pl-10 pr-3 py-2.5 border border-gray-700 rounded-lg bg-gray-900 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+            placeholder={`Search ${activeMode}...`}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
+            autoFocus
+          />
+        </div>
 
-        <h3 className="font-medium">Window Management & Spaces</h3>
+        {/* Mode Selector */}
+        <div className="flex space-x-2">
+          <button
+            onClick={() => {
+              setActiveMode('actions');
+              setSelectedIndex(0);
+            }}
+            className={cn(
+              "flex-1 px-3 py-2 rounded text-sm font-medium transition-colors",
+              activeMode === 'actions'
+                ? "bg-blue-600 text-white"
+                : "bg-gray-800 text-gray-300 hover:bg-gray-700"
+            )}
+          >
+            <Grid3X3 className="h-4 w-4 inline mr-2" />
+            Actions ({windowActions.length})
+          </button>
+          <button
+            onClick={() => {
+              setActiveMode('windows');
+              setSelectedIndex(0);
+              loadWindows();
+            }}
+            className={cn(
+              "flex-1 px-3 py-2 rounded text-sm font-medium transition-colors",
+              activeMode === 'windows'
+                ? "bg-blue-600 text-white"
+                : "bg-gray-800 text-gray-300 hover:bg-gray-700"
+            )}
+          >
+            <Laptop className="h-4 w-4 inline mr-2" />
+            Windows ({windows.length})
+          </button>
+        </div>
       </div>
 
-      <Tabs defaultValue="windows" className="flex-1 flex flex-col">
-        <TabsList className="grid w-full grid-cols-3 mx-4 mt-4">
-          <TabsTrigger value="windows">Windows</TabsTrigger>
-          <TabsTrigger value="layouts">Layouts</TabsTrigger>
-          <TabsTrigger value="spaces">Spaces</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="windows" className="flex-1 p-4">
-          <div className="space-y-4">
-            {/* Window Controls */}
-            <div className="flex items-center gap-2 mb-4">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => selectedWindows.forEach(minimizeWindow)}
-                disabled={selectedWindows.length === 0}
-              >
-                <Minimize2 className="h-4 w-4 mr-2" />
-                Minimize Selected
-              </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => selectedWindows.forEach(maximizeWindow)}
-                disabled={selectedWindows.length === 0}
-              >
-                <Maximize2 className="h-4 w-4 mr-2" />
-                Restore Selected
-              </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => selectedWindows.forEach(hideWindow)}
-                disabled={selectedWindows.length === 0}
-              >
-                <EyeOff className="h-4 w-4 mr-2" />
-                Hide Selected
-              </Button>
-            </div>
-
-            {/* Window List */}
-            <div className="space-y-2">
-              {windows.map((window) => (
-                <div
-                  key={window.id}
-                  className={cn(
-                    "flex items-center p-3 border rounded-lg cursor-pointer transition-colors",
-                    selectedWindows.includes(window.id)
-                      ? "bg-primary/10 border-primary"
-                      : "hover:bg-accent/50",
-                    !window.isVisible && "opacity-50",
-                  )}
-                  onClick={() => toggleWindowSelection(window.id)}
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <Monitor className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">{window.title}</span>
-                      <span className="text-sm text-muted-foreground">
-                        ({window.app})
-                      </span>
-                    </div>
-
-                    <div className="text-sm text-muted-foreground mt-1">
-                      {window.size.width} × {window.size.height} at (
-                      {window.position.x}, {window.position.y})
-                    </div>
-
-                    <div className="flex items-center gap-2 mt-2">
-                      {window.isMinimized && (
-                        <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded">
-                          Minimized
-                        </span>
-                      )}
-                      {!window.isVisible && (
-                        <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded">
-                          Hidden
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-1">
-                    {window.isMinimized ? (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          maximizeWindow(window.id);
-                        }}
-                        title="Restore"
-                      >
-                        <Maximize2 className="h-4 w-4" />
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          minimizeWindow(window.id);
-                        }}
-                        title="Minimize"
-                      >
-                        <Minimize2 className="h-4 w-4" />
-                      </Button>
-                    )}
-
-                    {window.isVisible ? (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          hideWindow(window.id);
-                        }}
-                        title="Hide"
-                      >
-                        <EyeOff className="h-4 w-4" />
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          showWindow(window.id);
-                        }}
-                        title="Show"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+      {/* Results */}
+      <div className="flex-1 overflow-hidden flex flex-col">
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
           </div>
-        </TabsContent>
-
-        <TabsContent value="layouts" className="flex-1 p-4">
-          <div className="space-y-4">
-            <div className="text-sm text-muted-foreground mb-4">
-              Choose a layout to automatically arrange your windows
+        ) : filteredItems.length > 0 ? (
+          <div className="flex-1 overflow-hidden">
+            <div className="text-xs text-gray-500 px-3 py-1">
+              {filteredItems.length} {activeMode} found
             </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              {LAYOUT_PRESETS.map((layout) => (
-                <Button
-                  key={layout.id}
-                  variant="outline"
-                  className="h-24 flex flex-col items-center justify-center gap-2 text-left"
-                  onClick={() => applyLayout(layout.id)}
-                >
-                  {layout.icon}
-                  <div className="text-center">
-                    <div className="font-medium">{layout.name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {layout.description}
-                    </div>
-                  </div>
-                </Button>
-              ))}
-            </div>
-
-            {/* Quick Actions */}
-            <div className="border-t pt-4 mt-6">
-              <h4 className="font-medium mb-3">Quick Actions</h4>
-              <div className="flex gap-2">
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => applyLayout('split-left-right')}
-                >
-                  <Move className="h-4 w-4 mr-2" />
-                  Tile All Windows
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => windows.forEach(w => minimizeWindow(w.id))}
-                >
-                  <Minimize2 className="h-4 w-4 mr-2" />
-                  Minimize All
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm"
+            <ul
+              ref={listRef}
+              className="flex-1 overflow-y-auto px-2 space-y-1 custom-scrollbar max-h-[calc(100vh-15rem)]"
+            >
+              {filteredItems.map((item, index) => (
+                <li
+                  key={activeMode === 'actions' ? (item as WindowAction).id : (item as WindowInfo).id}
+                  ref={index === selectedIndex ? selectedItemRef : null}
+                  className={cn(
+                    "flex items-center p-3 rounded-lg cursor-pointer transition-colors duration-100",
+                    index === selectedIndex
+                      ? "bg-blue-700 text-white shadow-lg"
+                      : "hover:bg-gray-800 text-gray-300"
+                  )}
                   onClick={() => {
-                    // Cycle through windows (bring next window to front)
-                    const visibleWindows = windows.filter(w => w.isVisible && !w.isMinimized);
-                    if (visibleWindows.length > 0) {
-                      // In a real implementation, this would cycle window focus
-                      console.log('Cycling through windows:', visibleWindows.map(w => w.title));
+                    if (activeMode === 'actions') {
+                      (item as WindowAction).action();
+                    } else {
+                      focusWindow((item as WindowInfo).id);
                     }
                   }}
+                  onMouseEnter={() => setSelectedIndex(index)}
                 >
-                  <RotateCw className="h-4 w-4 mr-2" />
-                  Cycle Windows
-                </Button>
-              </div>
-            </div>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="spaces" className="flex-1 p-4">
-          <div className="space-y-4">
-            {/* Current Spaces */}
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="font-medium">Desktop Spaces</h4>
-                <Button variant="outline" size="sm" onClick={createNewSpace}>
-                  <Layers className="h-4 w-4 mr-2" />
-                  New Space
-                </Button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                {spaces.map((space) => (
-                  <div
-                    key={space.id}
-                    className={cn(
-                      "p-4 border rounded-lg cursor-pointer transition-colors",
-                      space.active
-                        ? "bg-primary/10 border-primary"
-                        : "hover:bg-accent/50",
+                  <div className="flex-shrink-0 w-8 h-8 mr-3 flex items-center justify-center bg-gray-800/30 rounded-md">
+                    {activeMode === 'actions' ? (
+                      (item as WindowAction).icon
+                    ) : (
+                      <Square className={cn(
+                        "h-5 w-5",
+                        (item as WindowInfo).isActive ? "text-green-400" : "text-gray-400"
+                      )} />
                     )}
-                    onClick={() => switchToSpace(space.id)}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-medium">{space.name}</span>
-                      {space.active && (
-                        <span className="text-xs bg-primary text-primary-foreground px-2 py-1 rounded">
-                          Active
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="text-sm text-muted-foreground">
-                      {space.windows} window{space.windows !== 1 ? "s" : ""}
-                    </div>
                   </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Space Actions */}
-            <div className="border-t pt-4">
-              <h4 className="font-medium mb-3">Space Actions</h4>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm">
-                  <Move className="h-4 w-4 mr-2" />
-                  Move Window to Space
-                </Button>
-                <Button variant="outline" size="sm">
-                  <Grid3X3 className="h-4 w-4 mr-2" />
-                  Show All Spaces
-                </Button>
-              </div>
-            </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {activeMode === 'actions' 
+                        ? (item as WindowAction).name 
+                        : (item as WindowInfo).title
+                      }
+                    </p>
+                    <p className="text-xs text-gray-500 truncate">
+                      {activeMode === 'actions' 
+                        ? (item as WindowAction).description
+                        : `${(item as WindowInfo).app} • ${(item as WindowInfo).width}×${(item as WindowInfo).height}`
+                      }
+                    </p>
+                  </div>
+                  {activeMode === 'actions' && (item as WindowAction).shortcut && (
+                    <div className="flex-shrink-0 ml-2">
+                      <span className="text-xs bg-gray-700 px-2 py-1 rounded">
+                        {(item as WindowAction).shortcut}
+                      </span>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
-        </TabsContent>
-      </Tabs>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-center px-4 py-8">
+            <div className="text-gray-500 mb-2">
+              <Monitor className="h-10 w-10 mx-auto mb-2" />
+              <p>No {activeMode} found</p>
+            </div>
+            {searchQuery && (
+              <p className="text-sm text-gray-600">
+                Try a different search term
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="p-3 border-t border-gray-800 bg-gray-900 text-xs text-gray-500 flex justify-between">
+        <span>{filteredItems.length} {activeMode}</span>
+        <span>↑↓ Navigate | ↵ Execute | ⇥ Switch Mode | Esc Back</span>
+      </div>
     </div>
   );
 }
