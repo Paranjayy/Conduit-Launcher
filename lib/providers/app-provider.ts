@@ -51,8 +51,9 @@ export class AppSearchProvider implements SearchProvider {
 
       // Listen for the complete list of apps without icons
       if (typeof electron?.app?.onAllAppsNoIcons === 'function') {
+        console.log('[AppSearchProvider] 🎧 Setting up listener for all apps without icons');
         electron.app.onAllAppsNoIcons((allApps: Application[]) => {
-          console.log(`[AppSearchProvider] Received complete list of ${allApps.length} apps without icons`);
+          console.log(`[AppSearchProvider] 📥 Received complete list of ${allApps.length} apps without icons`);
           // Create a map of existing apps by path for quick lookup
           const existingAppsMap = new Map(this.appCache.map(app => [app.path, app]));
           
@@ -66,16 +67,27 @@ export class AppSearchProvider implements SearchProvider {
           // Sort alphabetically 
           this.appCache.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
           
-          console.log(`[AppSearchProvider] Updated cache with ${this.appCache.length} total apps`);
-          if (this.onCacheUpdate) this.onCacheUpdate();
+          console.log(`[AppSearchProvider] ✅ Updated cache with ${this.appCache.length} total apps (${this.appCache.filter(app => app.icon).length} with icons)`);
+          if (this.onCacheUpdate) {
+            console.log('[AppSearchProvider] 🔄 Triggering cache update callback');
+            this.onCacheUpdate();
+          }
         });
+      } else {
+        console.warn('[AppSearchProvider] ❌ onAllAppsNoIcons function not available in electron.app');
       }
 
       // Check if the onUpdatedAppIcons function exists at runtime
       if (typeof electron?.app?.onUpdatedAppIcons === 'function') {
-        console.log('[AppSearchProvider] Setting up listener for updated app icons.');
+        console.log('[AppSearchProvider] 🎧 Setting up listener for updated app icons');
         electron.app.onUpdatedAppIcons((updatedAppsWithIcons: Application[]) => {
-          console.log(`[AppSearchProvider] Received ${updatedAppsWithIcons.length} updated app icons.`);
+          console.log(`[AppSearchProvider] 📥 Received ${updatedAppsWithIcons.length} updated app icons`);
+          
+          // Log details of first few apps for debugging
+          updatedAppsWithIcons.slice(0, 2).forEach(app => {
+            console.log(`[AppSearchProvider] 🔍 Updated app "${app.name}": icon length = ${app.icon?.length || 0}, starts with = ${app.icon?.substring(0, 20) || 'no icon'}`);
+          });
+          
           let cacheChanged = false;
           
           // Create a map for fast lookup
@@ -84,11 +96,7 @@ export class AppSearchProvider implements SearchProvider {
           this.appCache = this.appCache.map(cachedApp => {
             const updatedApp = updateMap.get(cachedApp.path);
             if (updatedApp && updatedApp.icon && cachedApp.icon !== updatedApp.icon) {
-              console.log(`[AppSearchProvider] Updating icon for ${cachedApp.name}:`, {
-                hasNewIcon: !!updatedApp.icon,
-                iconLength: updatedApp.icon?.length || 0,
-                iconPrefix: updatedApp.icon?.substring(0, 20) + '...'
-              });
+              console.log(`[AppSearchProvider] 🔄 Updating icon for ${cachedApp.name}: ${cachedApp.icon?.length || 0} -> ${updatedApp.icon?.length || 0} chars`);
               cacheChanged = true;
               return { ...cachedApp, icon: updatedApp.icon };
             }
@@ -96,18 +104,25 @@ export class AppSearchProvider implements SearchProvider {
           });
           
           if (cacheChanged) {
-            console.log('[AppSearchProvider] Cache updated with new icons, notifying components');
+            console.log('[AppSearchProvider] ✅ Cache updated with new icons, notifying components');
+            console.log(`[AppSearchProvider] 📊 Cache now has ${this.appCache.filter(app => app.icon).length}/${this.appCache.length} apps with icons`);
             if (this.onCacheUpdate) {
+              console.log('[AppSearchProvider] 🔄 Triggering cache update callback');
               this.onCacheUpdate();
             }
             // Force a small delay to ensure components re-render
             setTimeout(() => {
               if (this.onCacheUpdate) {
+                console.log('[AppSearchProvider] 🔄 Triggering delayed cache update callback');
                 this.onCacheUpdate();
               }
             }, 100);
+          } else {
+            console.log('[AppSearchProvider] ⚠️  No cache changes detected from icon updates');
           }
         });
+      } else {
+        console.warn('[AppSearchProvider] ❌ onUpdatedAppIcons function not available in electron.app');
       }
     } catch (error) {
       console.error('[AppSearchProvider] Error initializing applications:', error);

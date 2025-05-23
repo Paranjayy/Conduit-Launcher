@@ -227,29 +227,34 @@ ipcMain.handle('get-app-version', () => {
 
 // Helper function to process apps and send icons in batches
 async function processAndSendIcons(appsToProcess, sourceDescription) {
-  console.log(`[processAndSendIcons] Starting icon processing for ${appsToProcess.length} ${sourceDescription}`);
-  const batchSize = 5; // Increase batch size slightly from 3 to 5
+  console.log(`\n=== [processAndSendIcons] Starting icon processing for ${appsToProcess.length} ${sourceDescription} ===`);
+  const batchSize = 3; // Smaller batch size for clearer debugging
   
   // First send all apps without icons to ensure complete list is available
   if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
-    console.log(`[processAndSendIcons] Sending all ${appsToProcess.length} apps without icons first`);
+    console.log(`[processAndSendIcons] 📤 Sending all ${appsToProcess.length} apps without icons first`);
     mainWindow.webContents.send('all-apps-no-icons', appsToProcess);
+    console.log(`[processAndSendIcons] ✅ Sent all apps without icons to renderer`);
   }
+  
+  // Add a delay before starting icon processing
+  await new Promise(r => setTimeout(r, 1000));
   
   for (let i = 0; i < appsToProcess.length; i += batchSize) {
     const batch = appsToProcess.slice(i, i + batchSize);
-    console.log(`[processAndSendIcons] Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(appsToProcess.length/batchSize)}: ${batch.map(app => app.name).join(', ')}`);
+    console.log(`\n--- [processAndSendIcons] Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(appsToProcess.length/batchSize)} ---`);
+    console.log(`[processAndSendIcons] Apps in this batch: ${batch.map(app => app.name).join(', ')}`);
 
     const appsWithIcons = await Promise.all(
       batch.map(async (appInfo) => {
-        console.log(`[processAndSendIcons] Getting icon for: ${appInfo.name}`);
+        console.log(`[processAndSendIcons] 🔍 Getting icon for: ${appInfo.name}`);
         const icon = await getAppIcon(appInfo.path);
         const result = { ...appInfo, icon: icon || '' }; // Ensure icon is always a string (base64 or empty)
         
         if (icon) {
-          console.log(`[processAndSendIcons] Successfully got icon for ${appInfo.name}: ${icon.length} characters`);
+          console.log(`[processAndSendIcons] ✅ Got icon for ${appInfo.name}: ${icon.length} characters`);
         } else {
-          console.warn(`[processAndSendIcons] No icon obtained for ${appInfo.name}`);
+          console.log(`[processAndSendIcons] ❌ No icon for ${appInfo.name}`);
         }
         
         return result;
@@ -259,18 +264,25 @@ async function processAndSendIcons(appsToProcess, sourceDescription) {
     // Send all apps in the batch, even if icon wasn't found
     if (appsWithIcons.length > 0) {
       const appsWithIconsCount = appsWithIcons.filter(app => app.icon).length;
-      console.log(`[processAndSendIcons] Sending batch of ${appsWithIcons.length} apps (${appsWithIconsCount} with icons)`);
+      console.log(`[processAndSendIcons] 📤 Sending batch of ${appsWithIcons.length} apps (${appsWithIconsCount} with icons) to renderer`);
+      
+      // Log first app in batch for debugging
+      const firstApp = appsWithIcons[0];
+      console.log(`[processAndSendIcons] 🔍 First app "${firstApp.name}": icon length = ${firstApp.icon?.length || 0}`);
       
       if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
         mainWindow.webContents.send('updated-app-icons', appsWithIcons);
-        console.log(`[processAndSendIcons] Successfully sent batch to renderer`);
+        console.log(`[processAndSendIcons] ✅ Successfully sent batch to renderer via 'updated-app-icons' event`);
       } else {
-        console.warn(`[processAndSendIcons] Cannot send batch - window/webContents unavailable`);
+        console.log(`[processAndSendIcons] ❌ Cannot send batch - window/webContents unavailable`);
       }
     }
-    await new Promise(r => setTimeout(r, 200)); // Slightly reduce delay between batches
+    
+    // Longer delay between batches for debugging
+    console.log(`[processAndSendIcons] ⏱️  Waiting 3 seconds before next batch...`);
+    await new Promise(r => setTimeout(r, 3000));
   }
-  console.log(`[processAndSendIcons] Finished icon processing for ${sourceDescription}`);
+  console.log(`\n=== [processAndSendIcons] ✅ Finished icon processing for ${sourceDescription} ===\n`);
 }
 
 ipcMain.handle('get-applications', async () => {

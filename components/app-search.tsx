@@ -45,6 +45,8 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
 
   // Test base64 image to verify if base64 images work at all
   const testBase64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+  
+  // Hardcoded test with a real macOS app icon (System Preferences icon as base64)
 
   // Handle clicks outside the dropdown to close it
   useEffect(() => {
@@ -290,23 +292,59 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
   return (
     <div className="flex flex-col h-full bg-gray-950 text-gray-100">
       <div className="p-4 space-y-2">
-        {/* Debug section - temporary */}
-        <div className="text-xs text-gray-500 bg-gray-800 p-2 rounded">
-          Debug: Cache size: {appSearchProvider.getCacheStats().totalApps}, 
-          Apps with icons: {appSearchProvider.getCacheStats().appsWithIcons}
-          <button 
-            onClick={() => {
-              console.log('[Debug] Manual refresh triggered');
-              console.log('[Debug] Cache stats:', appSearchProvider.getCacheStats());
-              appSearchProvider.search(searchTerm).then(results => {
-                console.log('[Debug] Manual search results:', results.length);
-                setFilteredApps(results);
-              });
-            }}
-            className="ml-2 px-2 py-1 bg-blue-600 text-white rounded text-xs"
-          >
-            Refresh
-          </button>
+        {/* Icon Test Section */}
+        <div className="text-xs text-gray-500 bg-gray-800 p-2 rounded space-y-2">
+          <div>
+            Debug: Cache size: {appSearchProvider.getCacheStats().totalApps}, 
+            Apps with icons: {appSearchProvider.getCacheStats().appsWithIcons}
+            <button 
+              onClick={() => {
+                console.log('[Debug] Manual refresh triggered');
+                console.log('[Debug] Cache stats:', appSearchProvider.getCacheStats());
+                appSearchProvider.search(searchTerm).then(results => {
+                  console.log('[Debug] Manual search results:', results.length);
+                  results.slice(0, 3).forEach((result, i) => {
+                    console.log(`[Debug] Result ${i}: ${result.title}`, {
+                      hasIcon: !!result.icon,
+                      hasMetadataIcon: !!result.metadata?.rawIcon,
+                      iconLength: result.metadata?.rawIcon?.length || 0,
+                      iconPrefix: result.metadata?.rawIcon?.substring(0, 30) || 'no icon'
+                    });
+                  });
+                  setFilteredApps(results);
+                });
+              }}
+              className="ml-2 px-2 py-1 bg-blue-600 text-white rounded text-xs"
+            >
+              Refresh
+            </button>
+          </div>
+          
+          {/* Test base64 image to verify if images work at all */}
+          <div className="flex items-center space-x-2">
+            <span>Test tiny image:</span>
+            <img 
+              src={testBase64} 
+              alt="test" 
+              className="w-4 h-4 bg-red-500"
+              onError={() => console.log('[Debug] Test image failed to load')}
+              onLoad={() => console.log('[Debug] Test image loaded successfully')}
+            />
+            <span className="text-green-400">← Should be a 1x1 pixel</span>
+          </div>
+          
+          {/* Test with a simple gear icon */}
+          <div className="flex items-center space-x-2">
+            <span>Test gear icon:</span>
+            <img 
+              src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEyIDhDMTQgOCAxNiA5IDEyIDEyQzggMTUgMTAgMTYgMTIgMTZDMTQgMTYgMTYgMTUgMTIgMTJaIiBmaWxsPSIjOTk5OTk5Ii8+Cjwvc3ZnPgo="
+              alt="gear" 
+              className="w-4 h-4"
+              onError={() => console.log('[Debug] Gear icon failed to load')}
+              onLoad={() => console.log('[Debug] Gear icon loaded successfully')}
+            />
+            <span className="text-green-400">← Should be a gear</span>
+          </div>
         </div>
         
         <div className="relative">

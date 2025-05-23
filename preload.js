@@ -17,9 +17,14 @@ contextBridge.exposeInMainWorld('electron', {
 
   // App information
   app: {
-    getAppVersion: () => ipcRenderer.invoke('get-app-version'),
-    getApplications: () => ipcRenderer.invoke('get-applications'),
-    launchApplication: (appPath) => ipcRenderer.invoke('launch-application', appPath),
+    getApplications: () => {
+      console.log('[Preload] Requesting applications...');
+      return ipcRenderer.invoke('get-applications');
+    },
+    launchApplication: (appPath) => {
+      console.log('[Preload] Launching application:', appPath);
+      return ipcRenderer.invoke('launch-application', appPath);
+    },
     getMenuItems: () => ipcRenderer.invoke('get-menu-items'),
     executeMenuItem: (menuPath) => ipcRenderer.invoke('execute-menu-item', menuPath),
     onAdditionalApps: (callback) => {
@@ -31,37 +36,55 @@ contextBridge.exposeInMainWorld('electron', {
         ipcRenderer.removeListener('additional-apps', additionalAppsListener);
       };
     },
-    onUpdatedAppIcons: (callback) => {
-      const updatedIconsListener = (_, apps) => callback(apps);
-      ipcRenderer.on('updated-app-icons', updatedIconsListener);
-      
-      // Return a cleanup function
+    onAllAppsNoIcons: (callback) => {
+      console.log('[Preload] Setting up onAllAppsNoIcons listener');
+      const handler = (event, apps) => {
+        console.log(`[Preload] Received all apps without icons: ${apps.length} apps`);
+        callback(apps);
+      };
+      ipcRenderer.on('all-apps-no-icons', handler);
       return () => {
-        ipcRenderer.removeListener('updated-app-icons', updatedIconsListener);
+        console.log('[Preload] Removing onAllAppsNoIcons listener');
+        ipcRenderer.removeListener('all-apps-no-icons', handler);
       };
     },
-    onAllAppsNoIcons: (callback) => {
-      const allAppsListener = (_, apps) => callback(apps);
-      ipcRenderer.on('all-apps-no-icons', allAppsListener);
-      
-      // Return a cleanup function
+    onUpdatedAppIcons: (callback) => {
+      console.log('[Preload] Setting up onUpdatedAppIcons listener');
+      const handler = (event, appsWithIcons) => {
+        console.log(`[Preload] Received ${appsWithIcons.length} apps with updated icons`);
+        // Log first few apps with detailed icon info
+        appsWithIcons.slice(0, 3).forEach(app => {
+          console.log(`[Preload] App "${app.name}": has icon = ${!!app.icon}, icon length = ${app.icon?.length || 0}`);
+        });
+        callback(appsWithIcons);
+      };
+      ipcRenderer.on('updated-app-icons', handler);
       return () => {
-        ipcRenderer.removeListener('all-apps-no-icons', allAppsListener);
+        console.log('[Preload] Removing onUpdatedAppIcons listener');
+        ipcRenderer.removeListener('updated-app-icons', handler);
       };
     }
   },
   
   // Global shortcuts
   shortcuts: {
-    saveShortcuts: (config) => ipcRenderer.invoke('save-shortcuts', config),
+    save: (config) => ipcRenderer.invoke('save-shortcuts', config),
     onGlobalShortcut: (callback) => {
-      const globalShortcutListener = (_, id) => callback(id);
-      ipcRenderer.on('global-shortcut', globalShortcutListener);
-      
-      // Return a cleanup function
+      ipcRenderer.on('global-shortcut', (event, shortcutId) => {
+        callback(shortcutId);
+      });
       return () => {
-        ipcRenderer.removeListener('global-shortcut', globalShortcutListener);
+        ipcRenderer.removeAllListeners('global-shortcut');
       };
     }
+  },
+
+  // Version info
+  version: () => ipcRenderer.invoke('get-app-version'),
+
+  // Menu functionality (macOS only)
+  menu: {
+    getItems: () => ipcRenderer.invoke('get-menu-items'),
+    executeItem: (menuPath) => ipcRenderer.invoke('execute-menu-item', menuPath)
   }
 }); 
