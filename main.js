@@ -516,12 +516,14 @@ async function extractIcns(iconPath) {
     console.log(`[extractIcns] Found ${icns.images.length} images in ICNS file`);
     
     // Sort by size and get the largest
-    const sortedImages = [...icns.images].sort((a, b) => 
-      (b.width * b.height) - (a.width * a.height)
-    );
+    const sortedImages = [...icns.images].sort((a, b) => {
+      const sizeA = (a.width || 0) * (a.height || 0);
+      const sizeB = (b.width || 0) * (b.height || 0);
+      return sizeB - sizeA;
+    });
     
     const largestImage = sortedImages[0];
-    console.log(`[extractIcns] Using image with dimensions ${largestImage.width}x${largestImage.height}`);
+    console.log(`[extractIcns] Using image with dimensions ${largestImage.width || 'unknown'}x${largestImage.height || 'unknown'}, data length: ${largestImage.data?.length || 0}`);
     
     // Get the PNG data from the largest image
     const pngBuffer = largestImage.data;

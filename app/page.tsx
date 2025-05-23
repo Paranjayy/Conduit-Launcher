@@ -37,7 +37,7 @@ type ViewType =
 export default function Home() {
   const { isElectron, readClipboard } = useElectronClipboard()
   const [isOpen, setIsOpen] = useState(true) // Start with the app open for development
-  const [activeView, setActiveView] = useState<ViewType>("command")
+  const [activeView, setActiveView] = useState<ViewType>("appSearch") // Temporarily set to appSearch for testing icons
 
   // Handler for changing views
   const handleViewChange = (view: ViewType) => {

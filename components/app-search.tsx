@@ -7,8 +7,23 @@ import type { SearchResult } from '@/lib/search-providers';
 type FilterCategory = 'all' | 'system' | 'user' | 'utilities' | 'creativity' | 'productivity';
 
 interface AppSearchProps {
-  onViewChange: (view: string) => void; // Keep as string for flexibility
+  onViewChange: (view: ViewType) => void;
 }
+
+type ViewType = 
+  | "command" 
+  | "clipboard" 
+  | "pasteStack" 
+  | "snippets" 
+  | "appSearch" 
+  | "preferences" 
+  | "contextualShortcuts" 
+  | "calculator" 
+  | "menuSearch" 
+  | "notes" 
+  | "multiClipboard"
+  | "emojiSearch"
+  | "aiChat";
 
 export function AppSearch({ onViewChange }: AppSearchProps) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -27,6 +42,9 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
 
   // Memoize the provider instance
   const appSearchProvider = useMemo(() => new AppSearchProvider(), []);
+
+  // Test base64 image to verify if base64 images work at all
+  const testBase64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
   // Handle clicks outside the dropdown to close it
   useEffect(() => {
@@ -203,10 +221,12 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
       iconDataType: typeof iconData,
       iconDataLength: iconData?.length || 0,
       isFailed: failedIcons.has(appPath),
-      appPath
+      appPath,
+      iconDataPrefix: iconData?.substring(0, 50) || 'no data'
     });
 
     if (!iconData || typeof iconData !== 'string' || failedIcons.has(appPath)) {
+      console.log(`[AppSearch] Using fallback icon for ${searchResult.title}`);
       return <Laptop className="h-6 w-6 text-blue-400" />;
     }
 
@@ -218,18 +238,36 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
       console.log(`[AppSearch] Added data URL prefix for ${searchResult.title}`);
     }
 
+    // Test if this is a valid data URL
+    try {
+      new URL(processedIconData);
+    } catch (e) {
+      console.error(`[AppSearch] Invalid data URL for ${searchResult.title}:`, e);
+      return <Laptop className="h-6 w-6 text-blue-400" />;
+    }
+
+    console.log(`[AppSearch] Attempting to render image for ${searchResult.title} with ${processedIconData.length} character data URL`);
+
     return (
       <div className="relative w-6 h-6">
         <img 
           src={processedIconData} 
           alt={`${searchResult.title} icon`}
           className="w-full h-full object-contain"
-          onError={() => {
-            console.error(`[AppSearch] Image failed to load for ${searchResult.title}:`, processedIconData?.substring(0, 50) + '...');
+          onError={(e) => {
+            console.error(`[AppSearch] Image failed to load for ${searchResult.title}:`, {
+              src: processedIconData?.substring(0, 50) + '...',
+              error: e,
+              naturalWidth: (e.target as HTMLImageElement).naturalWidth,
+              naturalHeight: (e.target as HTMLImageElement).naturalHeight
+            });
             handleImageError(appPath);
           }}
-          onLoad={() => {
-            console.log(`[AppSearch] Image loaded successfully for ${searchResult.title}`);
+          onLoad={(e) => {
+            console.log(`[AppSearch] Image loaded successfully for ${searchResult.title}:`, {
+              naturalWidth: (e.target as HTMLImageElement).naturalWidth,
+              naturalHeight: (e.target as HTMLImageElement).naturalHeight
+            });
           }}
           loading="lazy" // Add lazy loading for better performance with many icons
         />
@@ -252,6 +290,25 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
   return (
     <div className="flex flex-col h-full bg-gray-950 text-gray-100">
       <div className="p-4 space-y-2">
+        {/* Debug section - temporary */}
+        <div className="text-xs text-gray-500 bg-gray-800 p-2 rounded">
+          Debug: Cache size: {appSearchProvider.getCacheStats().totalApps}, 
+          Apps with icons: {appSearchProvider.getCacheStats().appsWithIcons}
+          <button 
+            onClick={() => {
+              console.log('[Debug] Manual refresh triggered');
+              console.log('[Debug] Cache stats:', appSearchProvider.getCacheStats());
+              appSearchProvider.search(searchTerm).then(results => {
+                console.log('[Debug] Manual search results:', results.length);
+                setFilteredApps(results);
+              });
+            }}
+            className="ml-2 px-2 py-1 bg-blue-600 text-white rounded text-xs"
+          >
+            Refresh
+          </button>
+        </div>
+        
         <div className="relative">
           <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
             <Search className="h-5 w-5 text-blue-400" />

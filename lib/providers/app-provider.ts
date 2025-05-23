@@ -97,7 +97,15 @@ export class AppSearchProvider implements SearchProvider {
           
           if (cacheChanged) {
             console.log('[AppSearchProvider] Cache updated with new icons, notifying components');
-            if (this.onCacheUpdate) this.onCacheUpdate();
+            if (this.onCacheUpdate) {
+              this.onCacheUpdate();
+            }
+            // Force a small delay to ensure components re-render
+            setTimeout(() => {
+              if (this.onCacheUpdate) {
+                this.onCacheUpdate();
+              }
+            }, 100);
           }
         });
       }
@@ -106,6 +114,19 @@ export class AppSearchProvider implements SearchProvider {
     }
   }
   
+  // Method to get cache statistics for debugging
+  getCacheStats() {
+    return {
+      totalApps: this.appCache.length,
+      appsWithIcons: this.appCache.filter(app => app.icon).length,
+      firstFewApps: this.appCache.slice(0, 3).map(app => ({
+        name: app.name,
+        hasIcon: !!app.icon,
+        iconLength: app.icon?.length || 0
+      }))
+    };
+  }
+
   async search(query: string): Promise<SearchResult[]> {
     const lowercaseQuery = query.toLowerCase();
     // Ensure appCache is used
