@@ -297,6 +297,17 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
     // } else if (iconData.length < 100) { 
     //   console.log(`[AppSearch] Suspiciously short iconData for ${searchResult.title} (length ${iconData.length}): "${iconData.substring(0, 50)}..."`);
     // }
+    // PASTE THIS ENTIRE NEW BLOCK:
+
+    // Enhanced Logging (uncomment for debugging by removing the // at the start of console.log lines)
+    // if (!iconData) {
+    //   console.log(`[AppSearch] No iconData for ${searchResult.title} (path: ${appPath}). Using fallback.`);
+    // } else if (typeof iconData !== 'string') {
+    //   console.log(`[AppSearch] iconData for ${searchResult.title} is not a string: ${typeof iconData}. Using fallback.`);
+    //   iconData = null; // Ensure it falls through to fallback
+    // } else if (iconData.length < 100) { 
+    //   console.log(`[AppSearch] Suspiciously short iconData for ${searchResult.title} (length ${iconData.length}): "${iconData.substring(0, 50)}..."`);
+    // }
 
     if (!iconData || typeof iconData !== 'string' || failedIcons.has(appPath)) {
       // if (!failedIcons.has(appPath) && iconData) { // Only log if not already marked as failed due to previous error
@@ -306,6 +317,28 @@ export function AppSearch({ onViewChange }: AppSearchProps) {
       // }
       return <Laptop className="h-6 w-6 text-blue-400" />;
     }
+
+    let finalSrc = iconData;
+    // Defensive check: if it's a long string but doesn't start with 'data:', assume it might be raw base64
+    if (finalSrc && typeof finalSrc === 'string' && finalSrc.length > 200 && !finalSrc.startsWith('data:')) {
+        // console.log(`[AppSearch] Attempting to prepend data URL prefix for ${searchResult.title}`);
+        finalSrc = `data:image/png;base64,${finalSrc}`;
+    }
+
+    return (
+      <div className="relative w-6 h-6">
+        <img
+          src={finalSrc} // Use the potentially modified finalSrc
+          alt={`${searchResult.title} icon`}
+          className="w-full h-full object-contain"
+          onError={() => {
+            // console.log(`[AppSearch] onError triggered for ${searchResult.title}. Original iconData (first 100 chars): "${String(iconData).substring(0,100)}..."`);
+            handleImageError(appPath);
+          }}
+          loading="lazy"
+        />
+      </div>
+    );
 
     let finalSrc = iconData;
     // Defensive check: if it's a long string but doesn't start with 'data:', assume it might be raw base64
